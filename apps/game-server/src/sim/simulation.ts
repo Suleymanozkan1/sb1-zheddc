@@ -298,13 +298,13 @@ export class ArenaSimulation {
   step(): void {
     this.now += this.dt;
 
+    // Spatial indexes for this tick (positions at the start of the tick).
     this.playerGrid.clear();
     for (const p of this.players.values()) if (p.alive) this.playerGrid.insert(p);
-
-    for (const p of this.players.values()) this.stepPlayer(p);
-
     this.npcGrid.clear();
     for (const n of this.npcs.values()) this.npcGrid.insert(n);
+
+    for (const p of this.players.values()) this.stepPlayer(p);
 
     this.wakeTimer -= this.dt;
     if (this.wakeTimer <= 0) {

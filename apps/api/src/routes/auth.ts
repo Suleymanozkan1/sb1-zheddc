@@ -18,9 +18,12 @@ function meta(req: FastifyRequest) {
   return { userAgent: typeof ua === "string" ? ua : null, ip: req.ip };
 }
 
-export function domainFor(ctx: ApiContext): string {
+/** Domain shown in the sign-in message: the calling origin if it is allow-listed, else the primary web origin. */
+export function domainFor(ctx: ApiContext, req?: FastifyRequest): string {
+  const origin = req?.headers.origin;
+  const candidate = origin && ctx.config.webOrigins.includes(origin) ? origin : (ctx.config.webOrigins[0] ?? "http://localhost");
   try {
-    return new URL(ctx.config.webOrigins[0] ?? "http://localhost").host;
+    return new URL(candidate).host;
   } catch {
     return "cryptoarena";
   }
@@ -44,7 +47,7 @@ export async function registerAuthRoutes(app: FastifyInstance, ctx: ApiContext):
     const nonce = randomBytes(16).toString("hex");
     const issuedAt = new Date();
     const expiresAt = new Date(issuedAt.getTime() + NONCE_TTL_MS);
-    const message = buildSignInMessage({ domain: domainFor(ctx), address: body.address, nonce, issuedAt, expiresAt, purpose: body.purpose === "LOGIN" ? "Sign in to CryptoArena" : "Link wallet to your CryptoArena account" });
+    const message = buildSignInMessage({ domain: domainFor(ctx, req), address: body.address, nonce, issuedAt, expiresAt, purpose: body.purpose === "LOGIN" ? "Sign in to CryptoArena" : "Link wallet to your CryptoArena account" });
     await ctx.prisma.walletNonce.create({ data: { address: body.address, nonce, message, purpose: body.purpose, userId: req.auth?.id ?? null, expiresAt } });
     return { nonce, message, expiresAt: expiresAt.toISOString() };
   });

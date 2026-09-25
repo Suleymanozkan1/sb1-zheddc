@@ -65,9 +65,10 @@ export const adminProductUpdateRequest = z.object({
   active: z.boolean().optional(),
   name: z.string().trim().min(1).max(80).optional(),
   description: z.string().trim().max(500).optional(),
+  reason: z.string().trim().max(500).optional(),
 });
-export const adminRoleRequest = z.object({ userId: uuid, role: z.enum(AdminRole).nullable() });
-export const adminLeaderboardDistributeRequest = z.object({ key: z.string().min(3).max(64), totalReward: decimalAmount });
+export const adminRoleRequest = z.object({ userId: uuid, role: z.enum(AdminRole).nullable(), reason: z.string().trim().max(500).optional() });
+export const adminLeaderboardDistributeRequest = z.object({ key: z.string().min(3).max(64), totalReward: decimalAmount, reason: z.string().trim().max(500).optional() });
 export const adminSeasonRequest = z.object({
   key: z.string().trim().min(2).max(20).regex(/^[A-Za-z0-9_-]+$/),
   name: z.string().trim().min(2).max(80),
@@ -75,6 +76,7 @@ export const adminSeasonRequest = z.object({
   rewardPool: decimalAmount,
   dailyRewardBudget: decimalAmount,
   multiplierBps: z.number().int().min(0).max(30_000).default(10_000),
+  reason: z.string().trim().max(500).optional(),
 });
 
 export type Infer<T extends z.ZodType> = z.infer<T>;

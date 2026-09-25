@@ -173,7 +173,7 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
       const loaded = await this.deps.persistence.loadPlayer(claims.sub, claims.uc);
       return { claims, loaded };
     } catch (err) {
-      throw new Error(err instanceof AppError ? err.message : "Could not load your character");
+      throw new Error(err instanceof AppError ? err.message : "Could not load your character", { cause: err });
     }
   }
 

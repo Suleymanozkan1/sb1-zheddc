@@ -19,7 +19,6 @@ export async function buildApp(ctx: ApiContext): Promise<FastifyInstance> {
     // Trust exactly N reverse-proxy hops (never blindly trust X-Forwarded-For).
     trustProxy: (_addr: string, hop: number) => hop < ctx.config.TRUST_PROXY_HOPS,
     bodyLimit: 64 * 1024,
-    disableRequestLogging: ctx.config.NODE_ENV === "test",
   });
 
   app.setReplySerializer((payload) => serialize(payload));
@@ -32,6 +31,8 @@ export async function buildApp(ctx: ApiContext): Promise<FastifyInstance> {
   await app.register(cookie, { hook: "onRequest" });
   await app.register(rateLimit, {
     global: true,
+    // Run after authentication (onRequest) so limits are keyed per user when signed in.
+    hook: "preHandler",
     max: 300,
     timeWindow: "1 minute",
     ...(ctx.redis ? { redis: ctx.redis, nameSpace: "ca-rl:" } : {}),

@@ -85,6 +85,7 @@ export async function registerAdminRoutes(app: FastifyInstance, ctx: ApiContext)
   app.get("/api/admin/users", async (req) => {
     requireAdmin(req, "SUPPORT");
     const q = parseQuery(adminListQuery, req);
+    if (q.status && !["ACTIVE", "SUSPENDED", "BANNED"].includes(q.status)) throw new AppError("BAD_REQUEST", "Invalid status filter");
     const where = {
       ...(q.q ? { OR: [{ username: { contains: q.q, mode: "insensitive" as const } }, { wallets: { some: { address: { contains: q.q } } } }, ...(uuid.safeParse(q.q).success ? [{ id: q.q }] : [])] } : {}),
       ...(q.status ? { status: q.status as "ACTIVE" | "SUSPENDED" | "BANNED" } : {}),
@@ -116,26 +117,28 @@ export async function registerAdminRoutes(app: FastifyInstance, ctx: ApiContext)
     return { user, balances: await getUserBalances(db, id) };
   });
 
-  const list = <T>(path: string, min: Parameters<typeof requireAdmin>[1], fn: (q: z.infer<typeof adminListQuery>) => Promise<T>) =>
+  const list = <T>(path: string, min: Parameters<typeof requireAdmin>[1], fn: (q: z.infer<typeof adminListQuery>) => Promise<T>, statuses: readonly string[] = []) =>
     app.get(path, async (req) => {
       requireAdmin(req, min);
-      return fn(parseQuery(adminListQuery, req));
+      const q = parseQuery(adminListQuery, req);
+      if (q.status && !statuses.includes(q.status)) throw new AppError("BAD_REQUEST", `Invalid status filter. Allowed: ${statuses.join(", ") || "none"}`);
+      return fn(q);
     });
 
   list("/api/admin/wallets", "SUPPORT", (q) => db.wallet.findMany({ where: q.q ? { address: { contains: q.q } } : {}, orderBy: { createdAt: "desc" }, take: q.limit, skip: q.offset, include: { user: { select: { username: true } } } }));
-  list("/api/admin/deposits", "SUPPORT", (q) => db.deposit.findMany({ where: q.status ? { status: q.status as never } : {}, orderBy: { createdAt: "desc" }, take: q.limit, skip: q.offset, include: { user: { select: { username: true } } } }));
-  list("/api/admin/withdrawals", "SUPPORT", (q) => db.withdrawal.findMany({ where: q.status === "REVIEW" ? { status: "PENDING", requiresReview: true } : q.status ? { status: q.status as never } : {}, orderBy: { createdAt: "desc" }, take: q.limit, skip: q.offset, include: { user: { select: { username: true, riskScore: true } } } }));
-  list("/api/admin/rewards", "SUPPORT", (q) => db.reward.findMany({ where: q.status ? { status: q.status as never } : {}, orderBy: { createdAt: "desc" }, take: q.limit, skip: q.offset, include: { user: { select: { username: true } } } }));
+  list("/api/admin/deposits", "SUPPORT", (q) => db.deposit.findMany({ where: q.status ? { status: q.status as never } : {}, orderBy: { createdAt: "desc" }, take: q.limit, skip: q.offset, include: { user: { select: { username: true } } } }), ["AWAITING_SIGNATURE", "SUBMITTED", "CREDITED", "FAILED", "EXPIRED"]);
+  list("/api/admin/withdrawals", "SUPPORT", (q) => db.withdrawal.findMany({ where: q.status === "REVIEW" ? { status: "PENDING", requiresReview: true } : q.status ? { status: q.status as never } : {}, orderBy: { createdAt: "desc" }, take: q.limit, skip: q.offset, include: { user: { select: { username: true, riskScore: true } } } }), ["REVIEW", "PENDING", "PROCESSING", "COMPLETED", "FAILED", "CANCELLED"]);
+  list("/api/admin/rewards", "SUPPORT", (q) => db.reward.findMany({ where: q.status ? { status: q.status as never } : {}, orderBy: { createdAt: "desc" }, take: q.limit, skip: q.offset, include: { user: { select: { username: true } } } }), ["GRANTED", "CAPPED", "REJECTED"]);
   list("/api/admin/items", "SUPPORT", () => db.item.findMany({ orderBy: [{ type: "asc" }, { rarity: "asc" }] }));
   list("/api/admin/characters", "SUPPORT", () => db.character.findMany({ include: { stats: true, _count: { select: { userCharacters: true } } } }));
   list("/api/admin/shop", "SUPPORT", () => db.shopProduct.findMany({ orderBy: [{ category: "asc" }, { sortOrder: "asc" }], include: { _count: { select: { purchases: true } } } }));
   list("/api/admin/purchases", "SUPPORT", (q) => db.purchase.findMany({ orderBy: { createdAt: "desc" }, take: q.limit, skip: q.offset, include: { product: true, user: { select: { username: true } } } }));
   list("/api/admin/seasons", "SUPPORT", () => db.season.findMany({ orderBy: { startsAt: "desc" } }));
   list("/api/admin/leaderboards", "SUPPORT", (q) => db.leaderboard.findMany({ orderBy: { createdAt: "desc" }, take: q.limit, include: { _count: { select: { entries: true } } } }));
-  list("/api/admin/rooms", "SUPPORT", (q) => db.gameMatch.findMany({ where: q.status ? { status: q.status as never } : { status: "RUNNING" }, orderBy: { createdAt: "desc" }, take: q.limit, include: { _count: { select: { players: { where: { leftAt: null } } } } } }));
+  list("/api/admin/rooms", "SUPPORT", (q) => db.gameMatch.findMany({ where: q.status ? { status: q.status as never } : { status: "RUNNING" }, orderBy: { createdAt: "desc" }, take: q.limit, include: { _count: { select: { players: { where: { leftAt: null } } } } } }), ["WAITING", "RUNNING", "ENDED"]);
   list("/api/admin/transactions", "SUPPORT", (q) => db.balanceLedger.findMany({ where: q.q && uuid.safeParse(q.q).success ? { OR: [{ userId: q.q }, { journalId: q.q }] } : {}, orderBy: { createdAt: "desc" }, take: q.limit, skip: q.offset, include: { account: { select: { kind: true, systemKey: true } } } }));
   list("/api/admin/audit", "ADMIN", (q) => db.auditLog.findMany({ where: q.q ? { action: { contains: q.q.toUpperCase() } } : {}, orderBy: { createdAt: "desc" }, take: q.limit, skip: q.offset }));
-  list("/api/admin/anticheat", "MODERATOR", (q) => db.antiCheatFlag.findMany({ orderBy: { createdAt: "desc" }, take: q.limit, skip: q.offset, include: { user: { select: { username: true, riskScore: true } } } }));
+  list("/api/admin/anticheat", "MODERATOR", (q) => db.antiCheatFlag.findMany({ orderBy: { createdAt: "desc" }, take: q.limit, skip: q.offset, include: { user: { select: { username: true, riskScore: true } } } }), ["REVIEW", "PENDING", "PROCESSING", "COMPLETED", "FAILED", "CANCELLED"]);
 
   // ── Actions ──
   app.post("/api/admin/users/status", async (req) => {
@@ -203,7 +206,7 @@ export async function registerAdminRoutes(app: FastifyInstance, ctx: ApiContext)
           ...(b.description !== undefined ? { description: b.description } : {}),
         },
       });
-      await writeAudit(tx, { actorType: "ADMIN", adminUserId: actor.adminUserId, action: "SHOP_PRODUCT_UPDATE", targetType: "ShopProduct", targetId: before.id, before: { price: before.price, active: before.active, name: before.name }, after: { price: after.price, active: after.active, name: after.name }, ip: actor.ip });
+      await writeAudit(tx, { actorType: "ADMIN", adminUserId: actor.adminUserId, action: "SHOP_PRODUCT_UPDATE", targetType: "ShopProduct", targetId: before.id, before: { price: before.price, active: before.active, name: before.name }, after: { price: after.price, active: after.active, name: after.name }, reason: b.reason ?? null, ip: actor.ip });
       return after;
     });
   });
@@ -219,7 +222,7 @@ export async function registerAdminRoutes(app: FastifyInstance, ctx: ApiContext)
         : before
           ? await tx.adminUser.update({ where: { userId: b.userId }, data: { active: false } })
           : null;
-      await writeAudit(tx, { actorType: "ADMIN", adminUserId: actor.adminUserId, userId: b.userId, action: "ADMIN_ROLE_SET", targetType: "AdminUser", targetId: b.userId, before: before ? { role: before.role, active: before.active } : null, after: after ? { role: after.role, active: after.active } : null, ip: actor.ip });
+      await writeAudit(tx, { actorType: "ADMIN", adminUserId: actor.adminUserId, userId: b.userId, action: "ADMIN_ROLE_SET", targetType: "AdminUser", targetId: b.userId, before: before ? { role: before.role, active: before.active } : null, after: after ? { role: after.role, active: after.active } : null, reason: b.reason ?? null, ip: actor.ip });
       return after;
     });
   });
@@ -229,7 +232,7 @@ export async function registerAdminRoutes(app: FastifyInstance, ctx: ApiContext)
     const b = parseBody(adminLeaderboardDistributeRequest, req);
     const paid = await withTransaction(db, async (tx) => {
       const n = await distributeLeaderboardRewards(tx, ctx.config, ctx.logger, b.key, units(ctx, b.totalReward));
-      await writeAudit(tx, { actorType: "ADMIN", adminUserId: actor.adminUserId, action: "LEADERBOARD_DISTRIBUTE", targetType: "Leaderboard", targetId: b.key, after: { totalReward: b.totalReward, paid: n }, ip: actor.ip });
+      await writeAudit(tx, { actorType: "ADMIN", adminUserId: actor.adminUserId, action: "LEADERBOARD_DISTRIBUTE", targetType: "Leaderboard", targetId: b.key, after: { totalReward: b.totalReward, paid: n }, reason: b.reason ?? null, ip: actor.ip });
       return n;
     }, { timeoutMs: 60_000 });
     return { paid };
@@ -245,7 +248,7 @@ export async function registerAdminRoutes(app: FastifyInstance, ctx: ApiContext)
         data: { key: b.key, name: b.name, status: "ACTIVE", startsAt: now, endsAt: new Date(now.getTime() + b.days * 86_400_000), rewardPool: units(ctx, b.rewardPool), dailyRewardBudget: units(ctx, b.dailyRewardBudget), multiplierBps: b.multiplierBps },
       });
       await fundRewardPool(tx, season.rewardPool, `season:${season.key}`, actor.adminUserId, `Season ${season.key} reward pool`);
-      await writeAudit(tx, { actorType: "ADMIN", adminUserId: actor.adminUserId, action: "SEASON_START", targetType: "Season", targetId: season.id, after: { key: season.key, rewardPool: season.rewardPool }, ip: actor.ip });
+      await writeAudit(tx, { actorType: "ADMIN", adminUserId: actor.adminUserId, action: "SEASON_START", targetType: "Season", targetId: season.id, after: { key: season.key, rewardPool: season.rewardPool }, reason: b.reason ?? null, ip: actor.ip });
       return season;
     });
   });

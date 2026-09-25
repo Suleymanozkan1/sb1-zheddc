@@ -20,7 +20,7 @@
     "db:deploy": "prisma migrate deploy",
     "db:seed": "prisma db seed",
     "db:reset": "prisma migrate reset --force",
-    "typecheck": "pnpm -r --parallel typecheck",
+    "typecheck": "pnpm -r --parallel typecheck && tsc -p tsconfig.json",
     "lint": "eslint . --max-warnings=0",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
@@ -30,7 +30,9 @@
     "build": "pnpm -r build",
     "devnet:setup": "tsx scripts/devnet-setup.ts",
     "admin:grant": "tsx scripts/grant-admin.ts",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "test:e2e": "playwright test",
+    "graph": "graphify update apps && graphify update packages"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -55,6 +57,11 @@
     "@solana-program/token": "^0.17.0",
     "@solana-program/system": "^0.15.0",
     "@colyseus/sdk": "^0.18.4",
-    "@playwright/test": "^1.63.0"
+    "@playwright/test": "^1.63.0",
+    "pg": "^8.23.0",
+    "fastify": "^5.12.5",
+    "@cryptoarena/observability": "workspace:*",
+    "@cryptoarena/validation": "workspace:*",
+    "ioredis": "^5.11.1"
   }
 }

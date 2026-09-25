@@ -1,7 +1,7 @@
 // Input sources produce intent only (movement vector, aim, buttons). Keyboard/mouse is the
 // default; TouchInput provides twin-stick controls for mobile. Both implement InputSource.
 import { Buttons } from "@cryptoarena/shared";
-import Phaser from "phaser";
+import type Phaser from "phaser";
 
 export interface InputFrame {
   mx: number;
