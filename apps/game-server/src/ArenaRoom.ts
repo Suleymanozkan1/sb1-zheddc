@@ -1063,7 +1063,13 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
     }
 
     // Ranked crypto needs a real lobby: nothing below RANKED_REWARD_MIN_HUMANS, scaled up to FULL.
-    const rankedScaleBps = rankedRewardScaleBps(placements.length, this.deps.config.RANKED_REWARD_MIN_HUMANS, this.deps.config.RANKED_REWARD_FULL_HUMANS);
+    // Only established accounts count — guests are free to create and bots are not players.
+    let realHumans = 0;
+    for (const client of this.clients) {
+      const p = this.sim.players.get(client.sessionId);
+      if (p && !p.isBot && client.userData && !client.userData.isGuest) realHumans++;
+    }
+    const rankedScaleBps = rankedRewardScaleBps(realHumans, this.deps.config.RANKED_REWARD_MIN_HUMANS, this.deps.config.RANKED_REWARD_FULL_HUMANS);
     for (const client of this.clients) {
       const p = this.sim.players.get(client.sessionId);
       const placement = standings.find((s) => s.id === client.sessionId)?.placement ?? 99;

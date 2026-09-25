@@ -50,7 +50,7 @@ The pool row is locked first, so concurrent grants cannot exceed budgets. Result
 * **PvP kills** pay crypto only when the victim is a non-guest account at or above
   `PVP_REWARD_MIN_VICTIM_LEVEL`, at most once per `PVP_SAME_VICTIM_COOLDOWN_SECONDS` per pair, and each
   earlier paid kill of the same victim today multiplies the next by `PVP_REPEAT_DECAY_BPS`.
-* **Ranked top 3** pays only with at least `RANKED_REWARD_MIN_HUMANS` real players, scaled 50 % → 100 %
+* **Ranked top 3** pays only with at least `RANKED_REWARD_MIN_HUMANS` real (non-guest, non-bot) players, scaled 50 % → 100 %
   up to `RANKED_REWARD_FULL_HUMANS`.
 * **Crystal Titan** pays `TITAN_REWARD_BASE` split by damage share among contributors with at least
   `TITAN_MIN_DAMAGE_SHARE_BPS`, and at most `TITAN_REWARDS_PER_USER_DAY` boss rewards per user per day.
