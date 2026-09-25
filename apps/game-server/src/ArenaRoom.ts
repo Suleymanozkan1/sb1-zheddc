@@ -40,6 +40,8 @@ export interface RoomDeps {
 interface AuthData {
   claims: GameTicketClaims;
   loaded: Awaited<ReturnType<Persistence["loadPlayer"]>>;
+  /** Fencing token of the account's GameSeat lease held by this room. */
+  seatToken: string;
 }
 
 interface Progress {
@@ -76,11 +78,25 @@ type ArenaClient = Client<{ userData: ClientData; auth: AuthData; messages: Serv
 // Process-wide registries. `activeUsers` is the fast, synchronous guard inside one process; the
 // `GameSeat` lease in PostgreSQL (claimSeat / renewSeats) enforces the same rule across processes.
 /** userId → live (or reserved) seat. A reservation made in onAuth expires if the join never completes. */
-const activeUsers = new Map<string, { roomId: string; joined: boolean; at: number }>();
+interface Seat {
+  roomId: string;
+  joined: boolean;
+  at: number;
+  /** Lease fencing token (null until the database claim returns). */
+  token: string | null;
+  /** Local time before which the database lease is guaranteed to still be ours. */
+  leaseUntil: number;
+}
+const activeUsers = new Map<string, Seat>();
 const RESERVATION_TTL_MS = 30_000;
-/** Database seat lease: renewed every SEAT_RENEW_MS while the player stays in the room. */
+/**
+ * Database seat lease: renewed every SEAT_RENEW_MS while the player stays in the room. A room that
+ * cannot prove its lease will outlive the next renewal (DB errors) or that lost it (taken over after
+ * expiry) disconnects the player, so two rooms never act for the same account.
+ */
 const SEAT_LEASE_MS = 45_000;
 const SEAT_RENEW_MS = 15_000;
+const SEAT_SAFETY_MS = 2_000;
 
 function seatTaken(userId: string): boolean {
   const seat = activeUsers.get(userId);
@@ -175,11 +191,7 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
     this.registerMessages();
 
     // Keep this room's seat leases alive (reserved and joined players, including reconnect windows).
-    this.clock.setInterval(() => {
-      const held: string[] = [];
-      for (const [userId, seat] of activeUsers) if (seat.roomId === this.roomId) held.push(userId);
-      this.deps.persistence.renewSeats(this.roomId, held, SEAT_LEASE_MS).catch((err: unknown) => this.deps.logger.warn({ err }, "failed to renew game seats"));
-    }, SEAT_RENEW_MS);
+    this.clock.setInterval(() => void this.renewSeats(), SEAT_RENEW_MS);
 
     const step = this.sim.dt;
     this.setSimulationInterval((delta) => {
@@ -202,24 +214,32 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
     if (this.mode === "RANKED" && this.state.phase !== "waiting" && this.state.phase !== "countdown") {
       throw new Error("This ranked match already started");
     }
-    activeUsers.set(claims.sub, { roomId: this.roomId, joined: false, at: Date.now() });
-    let leased = false;
+    const seat: Seat = { roomId: this.roomId, joined: false, at: Date.now(), token: null, leaseUntil: 0 };
+    activeUsers.set(claims.sub, seat);
+    let token: string | null = null;
     try {
-      leased = await this.deps.persistence.claimSeat(claims.sub, this.roomId, SEAT_LEASE_MS);
-      if (!leased) throw new AppError("CONFLICT", "You are already playing in an arena");
+      const claimStart = Date.now();
+      token = await this.deps.persistence.claimSeat(claims.sub, this.roomId, SEAT_LEASE_MS);
+      if (!token) throw new AppError("CONFLICT", "You are already playing in an arena");
+      seat.token = token;
+      seat.leaseUntil = claimStart + SEAT_LEASE_MS;
       const loaded = await this.deps.persistence.loadPlayer(claims.sub, claims.uc);
-      return { claims, loaded };
+      return { claims, loaded, seatToken: token };
     } catch (err) {
-      activeUsers.delete(claims.sub);
-      if (leased) await this.deps.persistence.releaseSeats(this.roomId, claims.sub).catch(() => undefined);
+      if (activeUsers.get(claims.sub) === seat) activeUsers.delete(claims.sub);
+      if (token) await this.deps.persistence.releaseSeat(claims.sub, token).catch(() => undefined);
       throw new Error(err instanceof AppError ? err.message : "Could not load your character", { cause: err });
     }
   }
 
   override async onJoin(client: ArenaClient): Promise<void> {
     if (!client.auth) throw new Error("Not authenticated");
-    const { claims, loaded } = client.auth;
-    activeUsers.set(claims.sub, { roomId: this.roomId, joined: true, at: Date.now() });
+    const { claims, loaded, seatToken } = client.auth;
+    const seat = activeUsers.get(claims.sub);
+    // The lease may have been lost between onAuth and onJoin (renewal failure / takeover).
+    if (!seat || seat.roomId !== this.roomId || seat.token !== seatToken) throw new Error("Your arena seat expired — please rejoin");
+    seat.joined = true;
+    seat.at = Date.now();
     const recent = recentLeavers.get(claims.sub);
     const restore = recent && recent.until > Date.now() ? recent : undefined;
     recentLeavers.delete(claims.sub);
@@ -309,9 +329,10 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
     }
     this.sim.removePlayer(client.sessionId);
     this.clientsBySim.delete(client.sessionId);
-    if (data && activeUsers.get(data.userId)?.roomId === this.roomId) {
+    const seat = data ? activeUsers.get(data.userId) : undefined;
+    if (data && seat && seat.roomId === this.roomId) {
       activeUsers.delete(data.userId);
-      await this.deps.persistence.releaseSeats(this.roomId, data.userId).catch((err: unknown) => this.deps.logger.warn({ err }, "failed to release game seat"));
+      if (seat.token) await this.deps.persistence.releaseSeat(data.userId, seat.token).catch((err: unknown) => this.deps.logger.warn({ err }, "failed to release game seat"));
     }
     this.state.playerCount = this.humanCount();
     metrics.activePlayers.dec();
@@ -323,8 +344,47 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
     if (!this.ended) await this.finishMatch(false);
     await this.deps.persistence.drain();
     for (const [userId, seat] of activeUsers) if (seat.roomId === this.roomId) activeUsers.delete(userId);
-    await this.deps.persistence.releaseSeats(this.roomId).catch((err: unknown) => this.deps.logger.warn({ err }, "failed to release game seats"));
+    await this.deps.persistence.releaseRoomSeats(this.roomId).catch((err: unknown) => this.deps.logger.warn({ err }, "failed to release game seats"));
     this.deps.logger.info({ event: LogEvent.GAME_ENDED, roomId: this.roomId, matchId: this.matchId }, "game ended");
+  }
+
+  /** Renews this room's seat leases and evicts players whose lease is lost or cannot be guaranteed. */
+  private async renewSeats(): Promise<void> {
+    const mine: { userId: string; seat: Seat; token: string }[] = [];
+    for (const [userId, seat] of activeUsers) if (seat.roomId === this.roomId && seat.token) mine.push({ userId, seat, token: seat.token });
+    if (mine.length === 0) return;
+    const started = Date.now();
+    let renewed: Set<string> | null = null;
+    try {
+      renewed = await this.deps.persistence.renewSeats(this.roomId, mine.map((m) => ({ userId: m.userId, token: m.token })), SEAT_LEASE_MS);
+    } catch (err) {
+      this.deps.logger.warn({ err, roomId: this.roomId }, "failed to renew game seats");
+    }
+    const now = Date.now();
+    for (const m of mine) {
+      if (activeUsers.get(m.userId) !== m.seat) continue; // left meanwhile
+      if (renewed?.has(m.userId)) {
+        m.seat.leaseUntil = started + SEAT_LEASE_MS;
+      } else if (renewed) {
+        this.evictSeat(m.userId, "lost"); // another room took the lease over
+      } else if (m.seat.leaseUntil - now <= SEAT_RENEW_MS + SEAT_SAFETY_MS) {
+        this.evictSeat(m.userId, "unverified"); // could expire before the next renewal attempt
+      }
+    }
+  }
+
+  /** Drops a player whose exclusive seat can no longer be guaranteed (fail closed). */
+  private evictSeat(userId: string, why: "lost" | "unverified"): void {
+    const token = activeUsers.get(userId)?.token;
+    activeUsers.delete(userId);
+    // Best effort: an unverified lease may still be ours; freeing it lets the player rejoin at once.
+    if (why === "unverified" && token) void this.deps.persistence.releaseSeat(userId, token).catch(() => undefined);
+    this.deps.logger.warn({ roomId: this.roomId, userId, why }, "game seat lease lost; disconnecting player");
+    for (const client of this.clients) {
+      if (client.userData?.userId !== userId && client.auth?.claims.sub !== userId) continue;
+      client.send("notice", { level: "error", message: "Your arena session could not be kept — please rejoin." });
+      client.leave(4001);
+    }
   }
 
   private humanCount(): number {

@@ -916,6 +916,8 @@ model FeatureFlag {
 model GameSeat {
   userId    String   @id @db.Uuid
   roomId    String
+  /// Fencing token: rotated on every claim. Renew/release only touch the lease holding this token.
+  token     String   @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   expiresAt DateTime
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 

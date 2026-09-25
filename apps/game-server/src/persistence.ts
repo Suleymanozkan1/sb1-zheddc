@@ -1,6 +1,7 @@
 // Bridges the in-memory simulation and the database. Every write is idempotent and
 // serialised per user, so reconnects, retries or duplicate events can never double-grant.
 
+import { randomUUID } from "node:crypto";
 import type { AppConfig } from "@cryptoarena/config";
 import { withTransaction, type Db } from "@cryptoarena/database";
 import {
@@ -68,29 +69,45 @@ export class Persistence {
   }
 
   /**
-   * Takes the account's cross-process seat lease for `roomId`. Fails while another room holds an
-   * unexpired lease, so a user cannot play in two game-server processes at once.
+   * Takes the account's cross-process seat lease for `roomId` and returns its fencing token, or
+   * null while another room holds an unexpired lease. Expiry uses the database clock.
    */
-  async claimSeat(userId: string, roomId: string, ttlMs: number): Promise<boolean> {
-    const expiresAt = new Date(Date.now() + ttlMs);
-    const rows = await this.prisma.$queryRaw<{ userId: string }[]>`
-      INSERT INTO "GameSeat" ("userId", "roomId", "expiresAt")
-      VALUES (CAST(${userId} AS uuid), ${roomId}, ${expiresAt})
-      ON CONFLICT ("userId") DO UPDATE SET "roomId" = EXCLUDED."roomId", "expiresAt" = EXCLUDED."expiresAt"
-      WHERE "GameSeat"."expiresAt" < now() OR "GameSeat"."roomId" = EXCLUDED."roomId"
-      RETURNING "userId"`;
-    return rows.length === 1;
+  async claimSeat(userId: string, roomId: string, ttlMs: number): Promise<string | null> {
+    const token = randomUUID();
+    const rows = await this.prisma.$queryRaw<{ token: string }[]>`
+      INSERT INTO "GameSeat" ("userId", "roomId", "token", "expiresAt")
+      VALUES (CAST(${userId} AS uuid), ${roomId}, CAST(${token} AS uuid), now() + make_interval(secs => ${ttlMs / 1000}))
+      ON CONFLICT ("userId") DO UPDATE
+        SET "roomId" = EXCLUDED."roomId", "token" = EXCLUDED."token", "expiresAt" = EXCLUDED."expiresAt"
+        WHERE "GameSeat"."expiresAt" < now()
+      RETURNING "token"::text AS token`;
+    return rows[0]?.token === token ? token : null;
   }
 
-  /** Extends the leases of the players a room still holds. */
-  async renewSeats(roomId: string, userIds: string[], ttlMs: number): Promise<void> {
-    if (userIds.length === 0) return;
-    await this.prisma.gameSeat.updateMany({ where: { roomId, userId: { in: userIds } }, data: { expiresAt: new Date(Date.now() + ttlMs) } });
+  /**
+   * Extends the leases this room still holds. Returns the user ids whose lease was renewed; any
+   * lease missing from the result was lost (taken over after expiry) and its player must leave.
+   */
+  async renewSeats(roomId: string, leases: { userId: string; token: string }[], ttlMs: number): Promise<Set<string>> {
+    const renewed = new Set<string>();
+    for (const l of leases) {
+      const rows = await this.prisma.$queryRaw<{ userId: string }[]>`
+        UPDATE "GameSeat" SET "expiresAt" = now() + make_interval(secs => ${ttlMs / 1000})
+        WHERE "userId" = CAST(${l.userId} AS uuid) AND "roomId" = ${roomId} AND "token" = CAST(${l.token} AS uuid)
+        RETURNING "userId"::text AS "userId"`;
+      if (rows.length === 1) renewed.add(l.userId);
+    }
+    return renewed;
   }
 
-  /** Releases one lease (only if this room still holds it), or every lease of the room. */
-  async releaseSeats(roomId: string, userId?: string): Promise<void> {
-    await this.prisma.gameSeat.deleteMany({ where: userId ? { roomId, userId } : { roomId } });
+  /** Releases one lease, only if it still carries this token (a newer claim is never deleted). */
+  async releaseSeat(userId: string, token: string): Promise<void> {
+    await this.prisma.gameSeat.deleteMany({ where: { userId, token } });
+  }
+
+  /** Releases every lease a disposed room still holds. */
+  async releaseRoomSeats(roomId: string): Promise<void> {
+    await this.prisma.gameSeat.deleteMany({ where: { roomId } });
   }
 
   async loadPlayer(userId: string, userCharacterId: string) {
