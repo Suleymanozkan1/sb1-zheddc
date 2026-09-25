@@ -1,11 +1,11 @@
 import { Button, Panel, shortAddress } from "@cryptoarena/ui";
 import { Page } from "../components/Layout";
-import { api } from "../lib/api";
+import { signOut } from "../lib/session";
 import { useApp } from "../lib/store";
 import { useWalletAuth } from "../wallet/useWalletAuth";
 
 export function Settings() {
-  const { me, settings, updateSettings, setMe, go } = useApp();
+  const { me, settings, updateSettings } = useApp();
   const { linkWallet, busy } = useWalletAuth();
   if (!me) return null;
   const toggle = (k: keyof typeof settings, label: string) => (
@@ -40,11 +40,7 @@ export function Settings() {
             </Button>
             <Button
               variant="danger"
-              onClick={async () => {
-                await api.logout().catch(() => undefined);
-                setMe(null);
-                go("landing");
-              }}
+              onClick={() => void signOut()}
             >
               Log out
             </Button>

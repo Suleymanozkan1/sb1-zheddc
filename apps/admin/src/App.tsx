@@ -8,6 +8,7 @@ import { ApiError, api, errorMessage } from "./lib/api";
 import { ROLE_COLOR, hasRole } from "./lib/roles";
 import { SECTIONS, href, navigate, useRoute, type SectionId } from "./lib/router";
 import { SessionCtx, type Session, type TokenMeta } from "./lib/session";
+import { useToast } from "./lib/toast";
 import { Overview } from "./sections/Overview";
 import { UserDrawer } from "./sections/UserDrawer";
 import { Users } from "./sections/Users";
@@ -55,6 +56,7 @@ type AuthState = { kind: "loading" } | { kind: "anon" } | { kind: "error"; messa
 export function App() {
   const [auth, setAuth] = useState<AuthState>({ kind: "loading" });
   const wallet = useWallet();
+  const toast = useToast();
 
   const check = useCallback(async () => {
     setAuth({ kind: "loading" });
@@ -71,14 +73,16 @@ export function App() {
   }, [check]);
 
   const logout = useCallback(async () => {
+    // Only show the signed-out screen once the server revoked the session and cleared the cookies.
     try {
       await api.logout();
-    } catch {
-      // Cookies are cleared server-side when possible; fall through to the login screen regardless.
+    } catch (err) {
+      toast("error", `Could not sign out: ${errorMessage(err)}`);
+      return;
     }
     if (wallet.connected) await wallet.disconnect().catch(() => undefined);
     setAuth({ kind: "anon" });
-  }, [wallet]);
+  }, [wallet, toast]);
 
   const onSignedIn = useCallback((me: MeDto) => setAuth({ kind: "user", me }), []);
 

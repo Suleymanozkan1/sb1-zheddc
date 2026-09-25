@@ -1,6 +1,6 @@
 import { Button, cx, formatInt, formatToken } from "@cryptoarena/ui";
 import type { ReactNode } from "react";
-import { api } from "../lib/api";
+import { signOut } from "../lib/session";
 import { useApp, type Screen } from "../lib/store";
 
 const NAV: { key: Screen; label: string }[] = [
@@ -29,7 +29,7 @@ export function Toasts() {
 }
 
 export function TopBar() {
-  const { me, go, screen, setMe } = useApp();
+  const { me, go, screen } = useApp();
   if (!me) return null;
   const b = me.balances;
   return (
@@ -65,11 +65,7 @@ export function TopBar() {
         <Button
           size="sm"
           variant="ghost"
-          onClick={async () => {
-            await api.logout().catch(() => undefined);
-            setMe(null);
-            go("landing");
-          }}
+          onClick={() => void signOut()}
         >
           Logout
         </Button>
