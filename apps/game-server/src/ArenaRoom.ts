@@ -73,10 +73,14 @@ interface ClientData {
 
 type ArenaClient = Client<{ userData: ClientData; auth: AuthData; messages: ServerMessages }>;
 
-// Process-wide registries (one game-server process). For multi-node deployments these move to Redis.
+// Process-wide registries. `activeUsers` is the fast, synchronous guard inside one process; the
+// `GameSeat` lease in PostgreSQL (claimSeat / renewSeats) enforces the same rule across processes.
 /** userId → live (or reserved) seat. A reservation made in onAuth expires if the join never completes. */
 const activeUsers = new Map<string, { roomId: string; joined: boolean; at: number }>();
 const RESERVATION_TTL_MS = 30_000;
+/** Database seat lease: renewed every SEAT_RENEW_MS while the player stays in the room. */
+const SEAT_LEASE_MS = 45_000;
+const SEAT_RENEW_MS = 15_000;
 
 function seatTaken(userId: string): boolean {
   const seat = activeUsers.get(userId);
@@ -170,6 +174,13 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
 
     this.registerMessages();
 
+    // Keep this room's seat leases alive (reserved and joined players, including reconnect windows).
+    this.clock.setInterval(() => {
+      const held: string[] = [];
+      for (const [userId, seat] of activeUsers) if (seat.roomId === this.roomId) held.push(userId);
+      this.deps.persistence.renewSeats(this.roomId, held, SEAT_LEASE_MS).catch((err: unknown) => this.deps.logger.warn({ err }, "failed to renew game seats"));
+    }, SEAT_RENEW_MS);
+
     const step = this.sim.dt;
     this.setSimulationInterval((delta) => {
       this.accumulator += Math.min(delta, 250);
@@ -192,11 +203,15 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
       throw new Error("This ranked match already started");
     }
     activeUsers.set(claims.sub, { roomId: this.roomId, joined: false, at: Date.now() });
+    let leased = false;
     try {
+      leased = await this.deps.persistence.claimSeat(claims.sub, this.roomId, SEAT_LEASE_MS);
+      if (!leased) throw new AppError("CONFLICT", "You are already playing in an arena");
       const loaded = await this.deps.persistence.loadPlayer(claims.sub, claims.uc);
       return { claims, loaded };
     } catch (err) {
       activeUsers.delete(claims.sub);
+      if (leased) await this.deps.persistence.releaseSeats(this.roomId, claims.sub).catch(() => undefined);
       throw new Error(err instanceof AppError ? err.message : "Could not load your character", { cause: err });
     }
   }
@@ -294,7 +309,10 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
     }
     this.sim.removePlayer(client.sessionId);
     this.clientsBySim.delete(client.sessionId);
-    if (data && activeUsers.get(data.userId)?.roomId === this.roomId) activeUsers.delete(data.userId);
+    if (data && activeUsers.get(data.userId)?.roomId === this.roomId) {
+      activeUsers.delete(data.userId);
+      await this.deps.persistence.releaseSeats(this.roomId, data.userId).catch((err: unknown) => this.deps.logger.warn({ err }, "failed to release game seat"));
+    }
     this.state.playerCount = this.humanCount();
     metrics.activePlayers.dec();
     if (data) this.deps.logger.info({ event: LogEvent.PLAYER_LEFT, roomId: this.roomId, userId: data.userId }, "player left");
@@ -305,6 +323,7 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
     if (!this.ended) await this.finishMatch(false);
     await this.deps.persistence.drain();
     for (const [userId, seat] of activeUsers) if (seat.roomId === this.roomId) activeUsers.delete(userId);
+    await this.deps.persistence.releaseSeats(this.roomId).catch((err: unknown) => this.deps.logger.warn({ err }, "failed to release game seats"));
     this.deps.logger.info({ event: LogEvent.GAME_ENDED, roomId: this.roomId, matchId: this.matchId }, "game ended");
   }
 

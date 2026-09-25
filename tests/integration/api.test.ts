@@ -34,7 +34,10 @@ describe("REST API", () => {
     const sig = getBase58Decoder().decode(await signBytes(signer.keyPair.privateKey, getUtf8Encoder().encode(message)));
 
     const bad = await app.inject({ method: "POST", url: "/api/auth/verify", payload: { address: signer.address, nonce, signature: getBase58Decoder().decode(new Uint8Array(64)) } });
-    expect(bad.statusCode).toBe(401); // nonce consumed by the invalid attempt too
+    expect(bad.statusCode).toBe(401);
+    // The invalid attempt consumed the nonce, so even the valid signature for it is now rejected.
+    const afterBad = await app.inject({ method: "POST", url: "/api/auth/verify", payload: { address: signer.address, nonce, signature: sig } });
+    expect(afterBad.statusCode).toBe(401);
 
     const nonce2 = (await app.inject({ method: "POST", url: "/api/auth/nonce", payload: { address: signer.address } })).json<{ nonce: string; message: string }>();
     const sig2 = getBase58Decoder().decode(await signBytes(signer.keyPair.privateKey, getUtf8Encoder().encode(nonce2.message)));
@@ -44,7 +47,22 @@ describe("REST API", () => {
 
     const replay = await app.inject({ method: "POST", url: "/api/auth/verify", payload: { address: signer.address, nonce: nonce2.nonce, signature: sig2 } });
     expect(replay.statusCode).toBe(401);
-    expect(sig).toBeTruthy();
+  });
+
+  it("binds wallet-link nonces to the account that requested them", async () => {
+    const signer = await generateKeyPairSigner();
+    const a = cookies(await app.inject({ method: "POST", url: "/api/auth/guest", payload: {} }));
+    const b = cookies(await app.inject({ method: "POST", url: "/api/auth/guest", payload: {} }));
+    const issued = await app.inject({ method: "POST", url: "/api/auth/nonce", headers: { cookie: a.header, "x-csrf-token": a.csrf }, payload: { address: signer.address, purpose: "LINK_WALLET" } });
+    expect(issued.statusCode).toBe(200);
+    const { nonce, message } = issued.json<{ nonce: string; message: string }>();
+    const signature = getBase58Decoder().decode(await signBytes(signer.keyPair.privateKey, getUtf8Encoder().encode(message)));
+    const payload = { address: signer.address, nonce, signature };
+
+    const stolen = await app.inject({ method: "POST", url: "/api/wallet/connect", headers: { cookie: b.header, "x-csrf-token": b.csrf }, payload });
+    expect(stolen.statusCode).toBe(401);
+    const own = await app.inject({ method: "POST", url: "/api/wallet/connect", headers: { cookie: a.header, "x-csrf-token": a.csrf }, payload });
+    expect(own.statusCode).toBe(200);
   });
 
   it("requires authentication and CSRF tokens for state changes", async () => {

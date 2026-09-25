@@ -66,9 +66,10 @@ export async function registerUserRoutes(app: FastifyInstance, ctx: ApiContext):
   app.post("/api/wallet/connect", { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } }, async (req) => {
     const user = requireUser(req);
     const body = parseBody(walletConnectRequest, req);
+    // The nonce is burned in its own transaction so a failed signature check cannot be retried with it.
+    const message = await withTransaction(ctx.prisma, (tx) => consumeNonce(tx, body.address, body.nonce, "LINK_WALLET", user.id));
+    if (!(await verifyWalletSignature(body.address, message, body.signature))) throw new AppError("INVALID_SIGNATURE", "Wallet signature is invalid");
     await withTransaction(ctx.prisma, async (tx) => {
-      const message = await consumeNonce(tx, body.address, body.nonce, "LINK_WALLET");
-      if (!(await verifyWalletSignature(body.address, message, body.signature))) throw new AppError("INVALID_SIGNATURE", "Wallet signature is invalid");
       const existing = await tx.wallet.findUnique({ where: { address: body.address } });
       if (existing && existing.userId !== user.id) throw new AppError("CONFLICT", "This wallet is linked to another account");
       if (!existing) {

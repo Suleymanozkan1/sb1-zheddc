@@ -30,9 +30,11 @@ export function domainFor(ctx: ApiContext, req?: FastifyRequest): string {
 }
 
 /** Atomically consumes a nonce: a signature can never be replayed. */
-export async function consumeNonce(tx: Tx, address: string, nonce: string, purpose: "LOGIN" | "LINK_WALLET"): Promise<string> {
+/** Consumes a single-use nonce. Link nonces are bound to the account that requested them (`forUserId`). */
+export async function consumeNonce(tx: Tx, address: string, nonce: string, purpose: "LOGIN" | "LINK_WALLET", forUserId: string | null = null): Promise<string> {
   const row = await tx.walletNonce.findUnique({ where: { nonce } });
   if (!row || row.address !== address || row.purpose !== purpose) throw new AppError("NONCE_EXPIRED", "Unknown or mismatched nonce");
+  if (purpose === "LINK_WALLET" && (!forUserId || row.userId !== forUserId)) throw new AppError("NONCE_EXPIRED", "Unknown or mismatched nonce");
   const used = await tx.walletNonce.updateMany({ where: { id: row.id, usedAt: null, expiresAt: { gt: new Date() } }, data: { usedAt: new Date() } });
   if (used.count !== 1) throw new AppError("NONCE_EXPIRED", "Nonce expired or already used");
   return row.message;
@@ -55,9 +57,10 @@ export async function registerAuthRoutes(app: FastifyInstance, ctx: ApiContext):
   app.post("/api/auth/verify", strict, async (req, reply) => {
     const body = parseBody(verifyRequest, req);
     const country = clientCountry(req, ctx.config.GEO_COUNTRY_HEADER);
+    // The nonce is burned in its own transaction so a failed signature check cannot be retried with it.
+    const message = await withTransaction(ctx.prisma, (tx) => consumeNonce(tx, body.address, body.nonce, "LOGIN"));
+    if (!(await verifyWalletSignature(body.address, message, body.signature))) throw new AppError("INVALID_SIGNATURE", "Wallet signature is invalid");
     const result = await withTransaction(ctx.prisma, async (tx) => {
-      const message = await consumeNonce(tx, body.address, body.nonce, "LOGIN");
-      if (!(await verifyWalletSignature(body.address, message, body.signature))) throw new AppError("INVALID_SIGNATURE", "Wallet signature is invalid");
 
       let wallet = await tx.wallet.findUnique({ where: { address: body.address }, include: { user: true } });
       let userId: string;

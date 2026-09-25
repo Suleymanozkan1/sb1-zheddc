@@ -286,22 +286,23 @@ model User {
   createdAt            DateTime    @default(now())
   updatedAt            DateTime    @updatedAt
 
-  sessions        Session[]
-  wallets         Wallet[]
-  characters      UserCharacter[]
-  inventory       InventoryItem[]
-  matchPlayers    GameMatchPlayer[]
-  quests          UserQuest[]
-  leaderboard     LeaderboardEntry[]
-  purchases       Purchase[]
-  accounts        BalanceAccount[]
-  deposits        Deposit[]
-  withdrawals     Withdrawal[]
-  rewards         Reward[]
-  rewardClaims    RewardClaim[]
-  admin           AdminUser?
-  antiCheatFlags  AntiCheatFlag[]
-  walletTxs       WalletTransaction[]
+  sessions       Session[]
+  wallets        Wallet[]
+  characters     UserCharacter[]
+  inventory      InventoryItem[]
+  matchPlayers   GameMatchPlayer[]
+  quests         UserQuest[]
+  leaderboard    LeaderboardEntry[]
+  purchases      Purchase[]
+  accounts       BalanceAccount[]
+  deposits       Deposit[]
+  withdrawals    Withdrawal[]
+  rewards        Reward[]
+  rewardClaims   RewardClaim[]
+  admin          AdminUser?
+  antiCheatFlags AntiCheatFlag[]
+  walletTxs      WalletTransaction[]
+  gameSeat       GameSeat?
 
   @@index([status])
   @@index([createdAt])
@@ -325,14 +326,14 @@ model Session {
 }
 
 model Wallet {
-  id         String    @id @default(uuid()) @db.Uuid
-  userId     String    @db.Uuid
-  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  address    String    @unique
-  chain      String    @default("solana")
-  isPrimary  Boolean   @default(true)
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @db.Uuid
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  address    String   @unique
+  chain      String   @default("solana")
+  isPrimary  Boolean  @default(true)
   verifiedAt DateTime
-  createdAt  DateTime  @default(now())
+  createdAt  DateTime @default(now())
 
   deposits Deposit[]
   txs      WalletTransaction[]
@@ -395,19 +396,19 @@ model Character {
 
 /// Base stats and per-level growth of a character definition.
 model CharacterStats {
-  id               String    @id @default(uuid()) @db.Uuid
-  characterId      String    @unique @db.Uuid
-  character        Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
-  baseHp           Int
-  baseDamage       Int
-  baseArmor        Int
-  baseSpeed        Int
-  baseAttackSpeed  Float
-  baseCritChance   Float
-  baseRange        Int
-  hpPerLevel       Int
-  damagePerLevel   Float
-  armorPerLevel    Float
+  id              String    @id @default(uuid()) @db.Uuid
+  characterId     String    @unique @db.Uuid
+  character       Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  baseHp          Int
+  baseDamage      Int
+  baseArmor       Int
+  baseSpeed       Int
+  baseAttackSpeed Float
+  baseCritChance  Float
+  baseRange       Int
+  hpPerLevel      Int
+  damagePerLevel  Float
+  armorPerLevel   Float
 }
 
 /// A character owned by a user (level/xp progress lives here).
@@ -443,21 +444,21 @@ model CharacterUpgrade {
 // ───────────────────────────── Items ─────────────────────────────
 
 model Item {
-  id               String    @id @default(uuid()) @db.Uuid
-  key              String    @unique
+  id               String   @id @default(uuid()) @db.Uuid
+  key              String   @unique
   name             String
   description      String
   type             ItemType
   rarity           Rarity
   stats            Json
-  stackable        Boolean   @default(false)
-  maxStack         Int       @default(1)
-  maxUpgrade       Int       @default(20)
-  levelRequirement Int       @default(1)
-  dropWeight       Int       @default(0)
-  metadata         Json      @default("{}")
-  active           Boolean   @default(true)
-  createdAt        DateTime  @default(now())
+  stackable        Boolean  @default(false)
+  maxStack         Int      @default(1)
+  maxUpgrade       Int      @default(20)
+  levelRequirement Int      @default(1)
+  dropWeight       Int      @default(0)
+  metadata         Json     @default("{}")
+  active           Boolean  @default(true)
+  createdAt        DateTime @default(now())
 
   inventory InventoryItem[]
 
@@ -534,21 +535,21 @@ model GameMatchPlayer {
 // ───────────────────────────── Quests ─────────────────────────────
 
 model Quest {
-  id               String         @id @default(uuid()) @db.Uuid
-  key              String         @unique
-  name             String
-  description      String
-  period           QuestPeriod
-  objective        QuestObjective
-  target           Int
-  rewardGold       BigInt         @default(0)
-  rewardGems       BigInt         @default(0)
-  rewardXp         Int            @default(0)
+  id           String         @id @default(uuid()) @db.Uuid
+  key          String         @unique
+  name         String
+  description  String
+  period       QuestPeriod
+  objective    QuestObjective
+  target       Int
+  rewardGold   BigInt         @default(0)
+  rewardGems   BigInt         @default(0)
+  rewardXp     Int            @default(0)
   /// Base crypto reward (token base units) before multipliers; subject to reward budgets.
-  rewardCrypto     BigInt         @default(0)
-  requiredTier     PremiumTier    @default(FREE)
-  active           Boolean        @default(true)
-  createdAt        DateTime       @default(now())
+  rewardCrypto BigInt         @default(0)
+  requiredTier PremiumTier    @default(FREE)
+  active       Boolean        @default(true)
+  createdAt    DateTime       @default(now())
 
   userQuests UserQuest[]
 }
@@ -594,17 +595,17 @@ model Season {
 }
 
 model Leaderboard {
-  id                    String           @id @default(uuid()) @db.Uuid
-  key                   String           @unique
-  scope                 LeaderboardScope
-  periodKey             String
-  seasonId              String?          @db.Uuid
-  season                Season?          @relation(fields: [seasonId], references: [id])
-  startsAt              DateTime?
-  endsAt                DateTime?
-  finalizedAt           DateTime?
-  rewardsDistributedAt  DateTime?
-  createdAt             DateTime         @default(now())
+  id                   String           @id @default(uuid()) @db.Uuid
+  key                  String           @unique
+  scope                LeaderboardScope
+  periodKey            String
+  seasonId             String?          @db.Uuid
+  season               Season?          @relation(fields: [seasonId], references: [id])
+  startsAt             DateTime?
+  endsAt               DateTime?
+  finalizedAt          DateTime?
+  rewardsDistributedAt DateTime?
+  createdAt            DateTime         @default(now())
 
   entries LeaderboardEntry[]
 
@@ -654,21 +655,21 @@ model ShopProduct {
 }
 
 model Purchase {
-  id             String         @id @default(uuid()) @db.Uuid
-  userId         String         @db.Uuid
-  user           User           @relation(fields: [userId], references: [id])
-  productId      String         @db.Uuid
-  product        ShopProduct    @relation(fields: [productId], references: [id])
-  quantity       Int            @default(1)
-  unitPrice      BigInt
-  totalPrice     BigInt
-  currency       Asset
-  status         PurchaseStatus @default(COMPLETED)
-  idempotencyKey String         @unique
-  journalId      String         @db.Uuid
-  refundJournalId String?       @db.Uuid
-  refundedAt     DateTime?
-  createdAt      DateTime       @default(now())
+  id              String         @id @default(uuid()) @db.Uuid
+  userId          String         @db.Uuid
+  user            User           @relation(fields: [userId], references: [id])
+  productId       String         @db.Uuid
+  product         ShopProduct    @relation(fields: [productId], references: [id])
+  quantity        Int            @default(1)
+  unitPrice       BigInt
+  totalPrice      BigInt
+  currency        Asset
+  status          PurchaseStatus @default(COMPLETED)
+  idempotencyKey  String         @unique
+  journalId       String         @db.Uuid
+  refundJournalId String?        @db.Uuid
+  refundedAt      DateTime?
+  createdAt       DateTime       @default(now())
 
   @@index([userId, createdAt])
   @@index([userId, productId])
@@ -677,18 +678,18 @@ model Purchase {
 // ───────────────────────────── Ledger ─────────────────────────────
 
 model BalanceAccount {
-  id            String        @id @default(uuid()) @db.Uuid
+  id            String       @id @default(uuid()) @db.Uuid
   ownerType     AccountOwner
-  userId        String?       @db.Uuid
-  user          User?         @relation(fields: [userId], references: [id])
-  systemKey     String?       @unique
+  userId        String?      @db.Uuid
+  user          User?        @relation(fields: [userId], references: [id])
+  systemKey     String?      @unique
   asset         Asset
   kind          AccountKind
   /// Cached balance = sum(CREDIT) - sum(DEBIT) of this account's ledger rows.
-  balance       BigInt        @default(0)
-  allowNegative Boolean       @default(false)
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  balance       BigInt       @default(0)
+  allowNegative Boolean      @default(false)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
 
   entries BalanceLedger[]
 
@@ -801,24 +802,24 @@ model Withdrawal {
 // ───────────────────────────── Rewards ─────────────────────────────
 
 model Reward {
-  id                    String       @id @default(uuid()) @db.Uuid
-  userId                String       @db.Uuid
-  user                  User         @relation(fields: [userId], references: [id])
-  source                RewardSource
-  asset                 Asset
-  baseAmount            BigInt
-  performanceBps        Int
-  eventBps              Int
-  seasonBps             Int
-  amount                BigInt
-  status                RewardStatus
-  reason                String?
-  seasonId              String?      @db.Uuid
-  season                Season?      @relation(fields: [seasonId], references: [id])
-  matchId               String?      @db.Uuid
-  idempotencyKey        String       @unique
-  journalId             String?      @db.Uuid
-  createdAt             DateTime     @default(now())
+  id             String       @id @default(uuid()) @db.Uuid
+  userId         String       @db.Uuid
+  user           User         @relation(fields: [userId], references: [id])
+  source         RewardSource
+  asset          Asset
+  baseAmount     BigInt
+  performanceBps Int
+  eventBps       Int
+  seasonBps      Int
+  amount         BigInt
+  status         RewardStatus
+  reason         String?
+  seasonId       String?      @db.Uuid
+  season         Season?      @relation(fields: [seasonId], references: [id])
+  matchId        String?      @db.Uuid
+  idempotencyKey String       @unique
+  journalId      String?      @db.Uuid
+  createdAt      DateTime     @default(now())
 
   claims RewardClaim[]
 
@@ -908,4 +909,15 @@ model FeatureFlag {
   enabled   Boolean
   note      String?
   updatedAt DateTime @updatedAt
+}
+
+/// Cross-process "one live character per account" lease held by a game-server room.
+/// Rooms renew their leases while the player is connected; an expired lease can be taken over.
+model GameSeat {
+  userId    String   @id @db.Uuid
+  roomId    String
+  expiresAt DateTime
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([roomId])
 }

@@ -67,6 +67,32 @@ export class Persistence {
     await withTransaction(this.prisma, (tx) => endMatch(tx, matchId, winnerUserId, placements));
   }
 
+  /**
+   * Takes the account's cross-process seat lease for `roomId`. Fails while another room holds an
+   * unexpired lease, so a user cannot play in two game-server processes at once.
+   */
+  async claimSeat(userId: string, roomId: string, ttlMs: number): Promise<boolean> {
+    const expiresAt = new Date(Date.now() + ttlMs);
+    const rows = await this.prisma.$queryRaw<{ userId: string }[]>`
+      INSERT INTO "GameSeat" ("userId", "roomId", "expiresAt")
+      VALUES (CAST(${userId} AS uuid), ${roomId}, ${expiresAt})
+      ON CONFLICT ("userId") DO UPDATE SET "roomId" = EXCLUDED."roomId", "expiresAt" = EXCLUDED."expiresAt"
+      WHERE "GameSeat"."expiresAt" < now() OR "GameSeat"."roomId" = EXCLUDED."roomId"
+      RETURNING "userId"`;
+    return rows.length === 1;
+  }
+
+  /** Extends the leases of the players a room still holds. */
+  async renewSeats(roomId: string, userIds: string[], ttlMs: number): Promise<void> {
+    if (userIds.length === 0) return;
+    await this.prisma.gameSeat.updateMany({ where: { roomId, userId: { in: userIds } }, data: { expiresAt: new Date(Date.now() + ttlMs) } });
+  }
+
+  /** Releases one lease (only if this room still holds it), or every lease of the room. */
+  async releaseSeats(roomId: string, userId?: string): Promise<void> {
+    await this.prisma.gameSeat.deleteMany({ where: userId ? { roomId, userId } : { roomId } });
+  }
+
   async loadPlayer(userId: string, userCharacterId: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new AppError("NOT_FOUND", "User not found");
