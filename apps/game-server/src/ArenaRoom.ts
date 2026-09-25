@@ -337,7 +337,8 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
     await this.departPlayer(client);
     const data = client.userData;
     const seat = data ? activeUsers.get(data.userId) : undefined;
-    if (data && seat && seat.roomId === this.roomId) {
+    // Only this session's own lease: a replacement session (evict + rejoin) holds a different token.
+    if (data && seat && seat.roomId === this.roomId && seat.token === client.auth?.seatToken) {
       activeUsers.delete(data.userId);
       if (seat.token) await this.deps.persistence.releaseSeat(data.userId, seat.token).catch((err: unknown) => this.deps.logger.warn({ err }, "failed to release game seat"));
     }
