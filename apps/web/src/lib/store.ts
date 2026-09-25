@@ -13,6 +13,8 @@ export interface Settings {
   showFps: boolean;
   screenShake: boolean;
   showDamageNumbers: boolean;
+  /** Bloom, vignette and dense particles. */
+  highQuality: boolean;
 }
 
 interface AppState {
@@ -33,7 +35,7 @@ interface AppState {
 }
 
 function loadSettings(): Settings {
-  const fallback: Settings = { showFps: false, screenShake: true, showDamageNumbers: true };
+  const fallback: Settings = { showFps: false, screenShake: true, showDamageNumbers: true, highQuality: true };
   try {
     const raw = localStorage.getItem("ca.settings");
     return raw ? { ...fallback, ...(JSON.parse(raw) as Partial<Settings>) } : fallback;

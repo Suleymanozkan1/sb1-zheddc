@@ -9,6 +9,17 @@ import { api } from "../lib/api";
 import { errorMessage, useApp } from "../lib/store";
 import { Hud } from "./Hud";
 
+/**
+ * Joins and leaves run one at a time. The server allows one seat per user, so a remount
+ * (React StrictMode, fast navigation) must finish leaving before the next join starts.
+ */
+let sessionChain: Promise<unknown> = Promise.resolve();
+function serial<T>(fn: () => Promise<T>): Promise<T> {
+  const run = sessionChain.then(fn);
+  sessionChain = run.catch(() => undefined);
+  return run;
+}
+
 export function GameView() {
   const { selectedCharacterId, mode, go, setBalances } = useApp();
   const container = useRef<HTMLDivElement>(null);
@@ -24,12 +35,17 @@ export function GameView() {
 
     (async () => {
       if (!selectedCharacterId) throw new Error("Select a character first");
-      const { ticket } = await api.gameTicket(selectedCharacterId, mode);
-      const conn = await GameConnection.join(ticket, mode);
-      if (cancelled) {
-        await conn.leave();
-        return;
-      }
+      const conn = await serial(async () => {
+        if (cancelled) return null;
+        const { ticket } = await api.gameTicket(selectedCharacterId, mode);
+        const joined = await GameConnection.join(ticket, mode);
+        if (cancelled) {
+          await joined.leave();
+          return null;
+        }
+        return joined;
+      });
+      if (!conn) return;
       connRef.current = conn;
       conn.room.onLeave((code) => {
         if (code !== 1000 && code !== 4000) useHud.getState().set({ error: `Disconnected (${code})` });
@@ -39,6 +55,9 @@ export function GameView() {
         if (conn.state?.mapSeed) return resolve();
         conn.room.onStateChange.once(() => resolve());
       });
+      // Canvas text needs the web fonts ready before it is rasterized.
+      await Promise.race([document.fonts.load('700 12px "Orbitron"'), new Promise((r) => setTimeout(r, 1500))]).catch(() => undefined);
+      if (cancelled) return;
       game = new Phaser.Game({
         type: Phaser.WEBGL,
         parent: container.current!,
@@ -57,14 +76,16 @@ export function GameView() {
     return () => {
       cancelled = true;
       game?.destroy(true);
-      void connRef.current?.leave();
+      const conn = connRef.current;
       connRef.current = null;
+      if (conn) void serial(() => conn.leave());
     };
   }, [selectedCharacterId, mode]);
 
   const leave = async () => {
-    await connRef.current?.leave();
+    const conn = connRef.current;
     connRef.current = null;
+    if (conn) await serial(() => conn.leave());
     try {
       const me = await api.me();
       setBalances(me.balances);

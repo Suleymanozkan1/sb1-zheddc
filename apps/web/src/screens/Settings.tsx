@@ -55,6 +55,7 @@ export function Settings() {
             {toggle("showDamageNumbers", "Show damage numbers")}
             {toggle("screenShake", "Screen shake")}
             {toggle("showFps", "Show FPS / ping")}
+            {toggle("highQuality", "High quality effects (bloom, particles)")}
           </div>
         </Panel>
         <Panel title="Fair play & compliance" className="md:col-span-2">

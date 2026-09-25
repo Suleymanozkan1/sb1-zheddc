@@ -10,3 +10,90 @@
   background: #0f1226;
   border: 1px solid rgb(255 255 255 / 0.1);
 }
+
+/* ───────── In-game HUD ───────── */
+.hud-panel {
+  position: relative;
+  background:
+    linear-gradient(135deg, rgb(15 23 42 / 0.82), rgb(2 6 23 / 0.72)),
+    repeating-linear-gradient(90deg, rgb(34 211 238 / 0.03) 0 1px, transparent 1px 6px);
+  border: 1px solid rgb(34 211 238 / 0.22);
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.5), 0 10px 30px rgb(0 0 0 / 0.45), inset 0 1px 0 rgb(255 255 255 / 0.06);
+  backdrop-filter: blur(10px);
+  clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
+}
+.hud-panel::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 14px;
+  right: 28px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--hud-accent, #22d3ee), transparent);
+}
+.hud-bar {
+  position: relative;
+  overflow: hidden;
+  background: rgb(2 6 23 / 0.9);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.08);
+  transform: skewX(-12deg);
+}
+.hud-bar > i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  display: block;
+}
+.hud-bar .fill::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgb(255 255 255 / 0.35), transparent 45%, rgb(0 0 0 / 0.25));
+}
+.hud-bar .fill::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(90deg, transparent 0 9.6%, rgb(2 6 23 / 0.55) 9.6% 10%);
+  z-index: 1;
+}
+.hud-slot {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(circle at 50% 30%, rgb(30 41 59 / 0.95), rgb(2 6 23 / 0.95));
+  border: 1px solid rgb(148 163 184 / 0.25);
+  transform: rotate(45deg);
+  border-radius: 14px;
+  transition: box-shadow 0.25s, border-color 0.25s;
+}
+.hud-slot > .content {
+  transform: rotate(-45deg);
+}
+.hud-slot.ready {
+  border-color: var(--slot-color);
+  box-shadow: 0 0 18px -2px var(--slot-color), inset 0 0 14px -4px var(--slot-color);
+}
+@keyframes hud-banner {
+  0% { opacity: 0; transform: translate(-50%, -12px) scale(0.96); letter-spacing: 0.6em; }
+  15% { opacity: 1; transform: translate(-50%, 0) scale(1); letter-spacing: 0.3em; }
+  80% { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, 0) scale(1); }
+}
+.hud-banner { animation: hud-banner 3.2s ease-out forwards; }
+@keyframes hud-pulse { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+.hud-lowhp {
+  background: radial-gradient(ellipse at center, transparent 45%, rgb(225 29 72 / 0.55) 100%);
+  animation: hud-pulse 1s ease-in-out infinite;
+}
+@keyframes hud-notice {
+  0% { opacity: 0; transform: translateY(10px) scale(0.9); }
+  12% { opacity: 1; transform: translateY(0) scale(1.08); }
+  20% { transform: scale(1); }
+  85% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-14px); }
+}
+.hud-notice { animation: hud-notice 3.5s ease-out forwards; }
+@keyframes hud-feed { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
+.hud-feed { animation: hud-feed 0.25s ease-out; }

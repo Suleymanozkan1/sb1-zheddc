@@ -41,6 +41,14 @@ export interface HudState {
   fps: number;
   nearMerchant: boolean;
   region: string;
+  regionKey: string;
+  nearLoot: boolean;
+  selfName: string;
+  selfClass: string;
+  selfColor: number;
+  killedBy: string | null;
+  /** Data URL of the local hero sprite for the HUD portrait. */
+  portrait: string;
   set: (p: Partial<HudState>) => void;
   pushKill: (k: KillFeedEntry) => void;
   pushNotice: (text: string, color?: string) => void;
@@ -76,6 +84,13 @@ const initial = {
   fps: 0,
   nearMerchant: false,
   region: "",
+  regionKey: "",
+  nearLoot: false,
+  selfName: "",
+  selfClass: "",
+  selfColor: 0x22d3ee,
+  killedBy: null,
+  portrait: "",
 } satisfies Omit<HudState, "set" | "pushKill" | "pushNotice" | "reset">;
 
 export const useHud = create<HudState>((set, get) => ({
