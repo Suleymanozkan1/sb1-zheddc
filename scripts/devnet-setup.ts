@@ -202,7 +202,7 @@ async function main(): Promise<void> {
     REWARD_TOKEN_DECIMALS: String(DECIMALS),
   };
   if (args.includes("--write-env")) {
-    writeEnv({ ...values, TREASURY_SECRET: secretJson });
+    writeEnv({ ...values, TREASURY_SECRET: JSON.stringify(JSON.parse(secretJson) as number[]) });
   } else {
     console.log("\nAdd to .env (TREASURY_SECRET = contents of secrets/treasury.json; blockchain-service only):");
     for (const [k, v] of Object.entries(values)) console.log(`${k}=${v}`);
