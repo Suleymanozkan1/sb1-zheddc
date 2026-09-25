@@ -8,7 +8,7 @@ test("demo flow: guest → character → arena → inventory → shop → wallet
 
   // Characters: starter heroes are owned.
   await page.getByRole("button", { name: "Characters", exact: true }).first().click();
-  await expect(page.getByRole("heading", { name: "Characters" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Choose your hero" })).toBeVisible();
   await page.getByRole("button", { name: /Ranger/ }).first().click();
   await page.getByRole("button", { name: /Select for battle|Selected/ }).click();
 
