@@ -1,0 +1,22 @@
+{
+  "name": "@cryptoarena/economy",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@cryptoarena/config": "workspace:*",
+    "@cryptoarena/database": "workspace:*",
+    "@cryptoarena/game-core": "workspace:*",
+    "@cryptoarena/observability": "workspace:*",
+    "@cryptoarena/shared": "workspace:*",
+    "@cryptoarena/blockchain": "workspace:*",
+    "@solana/kit": "^8.3.0"
+  },
+  "devDependencies": {}
+}

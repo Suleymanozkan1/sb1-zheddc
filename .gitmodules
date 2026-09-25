@@ -28,3 +28,9 @@
 [submodule "repos/prisma-orm"]
 	path = repos/prisma-orm
 	url = https://github.com/prisma/orm.git
+[submodule "repos/graphify-labs-graphify"]
+	path = repos/graphify-labs-graphify
+	url = https://github.com/Graphify-Labs/graphify.git
+[submodule "repos/coderabbitai-skills"]
+	path = repos/coderabbitai-skills
+	url = https://github.com/coderabbitai/skills.git
