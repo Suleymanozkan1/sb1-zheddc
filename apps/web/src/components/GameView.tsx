@@ -49,6 +49,8 @@ export function GameView() {
         scene: [],
       });
       game.scene.add("arena", ArenaScene, true, { conn, touch: setTouch });
+      // Development-only debugging handle (stripped from production builds).
+      if (import.meta.env.DEV) (window as unknown as { __arena?: Phaser.Game }).__arena = game;
       setReady(true);
     })().catch((err: unknown) => setError(errorMessage(err)));
 

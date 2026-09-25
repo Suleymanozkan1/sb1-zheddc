@@ -38,6 +38,8 @@ export interface PlayerProgressDelta {
   chests: number;
   win: boolean;
   left?: boolean;
+  /** True when the session lasted long enough to count toward PLAY_MATCH quests. */
+  countsAsMatch?: boolean;
 }
 
 /**
@@ -84,7 +86,7 @@ export async function flushPlayerProgress(tx: Tx, _config: AppConfig, _logger: L
   if (d.chests > 0) completed.push(...(await recordQuestProgress(tx, d.userId, "OPEN_CHEST", d.chests)));
   if (d.damageDealt > 0) completed.push(...(await recordQuestProgress(tx, d.userId, "DEAL_DAMAGE", Math.floor(d.damageDealt))));
   if (d.win) completed.push(...(await recordQuestProgress(tx, d.userId, "WIN_MATCH", 1)));
-  if (d.left) completed.push(...(await recordQuestProgress(tx, d.userId, "PLAY_MATCH", 1)));
+  if (d.countsAsMatch) completed.push(...(await recordQuestProgress(tx, d.userId, "PLAY_MATCH", 1)));
   completed.push(...(await recordQuestProgress(tx, d.userId, "REACH_LEVEL", xp.level, "max")));
 
   return { level: xp.level, leveledUp: xp.leveledUp, completedQuests: completed.map((q) => ({ key: q.key, name: q.name })) };

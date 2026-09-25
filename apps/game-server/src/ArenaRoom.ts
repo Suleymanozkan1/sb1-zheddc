@@ -68,6 +68,7 @@ interface ClientData {
   lastStatsSentAt: number;
   pendingPickup: boolean;
   lastFlushedDamage: number;
+  joinedAt: number;
 }
 
 type ArenaClient = Client<{ userData: ClientData; auth: AuthData; messages: ServerMessages }>;
@@ -91,6 +92,14 @@ const pingSchema = z.object({ t: z.number().finite() });
 
 /** In-arena merchant catalogue (prices still come from the ShopProduct table). */
 const MERCHANT_SKUS = new Set(["potion_pack_5"]);
+
+function pruneExpired(): void {
+  const now = Date.now();
+  for (const [k, v] of recentLeavers) if (v.until < now) recentLeavers.delete(k);
+  if (pvpKillLog.size > 50_000) {
+    for (const [k, t] of pvpKillLog) if (now - t > 3_600_000) pvpKillLog.delete(k);
+  }
+}
 
 function emptyProgress(): Progress {
   return { flushSeq: 0, kills: 0, deaths: 0, npcKills: 0, damageDealt: 0, xp: 0, gold: 0, resources: 0, chests: 0 };
@@ -164,8 +173,8 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
   override async onAuth(_client: ArenaClient, options: { ticket?: unknown }, _ctx: AuthContext): Promise<AuthData> {
     const claims = await this.deps.tickets.verify(options?.ticket, this.mode);
     if (!claims) throw new Error("Invalid or expired game ticket");
-    const existing = activeUsers.get(claims.sub);
-    if (existing && existing !== this.roomId) throw new Error("You are already playing in another arena");
+    // One live character per account across all rooms (reconnections bypass onAuth).
+    if (activeUsers.has(claims.sub)) throw new Error("You are already playing in an arena");
     if (this.mode === "RANKED" && this.state.phase !== "waiting" && this.state.phase !== "countdown") {
       throw new Error("This ranked match already started");
     }
@@ -219,6 +228,7 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
       lastStatsSentAt: 0,
       pendingPickup: false,
       lastFlushedDamage: 0,
+      joinedAt: Date.now(),
     };
     this.clientsBySim.set(p.id, client);
     client.view = new StateView();
@@ -261,8 +271,10 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
     const p = this.sim.players.get(client.sessionId);
     if (p && data) {
       // Remember HP and cooldowns briefly so leaving/rejoining cannot be used to reset them.
+      pruneExpired();
       recentLeavers.set(data.userId, { hpFraction: p.alive ? p.hp / p.stats.maxHp : 0.5, cooldowns: this.sim.cooldownsOf(p), until: Date.now() + 60_000 });
-      await this.flushClient(client, { left: true });
+      // A session only counts as a played match after 60s (prevents join/leave quest farming).
+      await this.flushClient(client, { left: true, countsAsMatch: Date.now() - data.joinedAt >= 60_000 });
       this.broadcastNear(p.x, p.y, "player_leave", { id: p.id, name: p.name });
     }
     this.sim.removePlayer(client.sessionId);
@@ -596,6 +608,7 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
     const last = pvpKillLog.get(pairKey) ?? 0;
     if (Date.now() - last < this.deps.config.PVP_SAME_VICTIM_COOLDOWN_SECONDS * 1000) return;
     pvpKillLog.set(pairKey, Date.now());
+    pruneExpired();
 
     const ratio = Math.max(0.5, Math.min(2, victim.level / Math.max(1, killer.player.level)));
     void this.deps.persistence
@@ -783,7 +796,7 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
     }
   }
 
-  private async flushClient(client: ArenaClient, opts: { left?: boolean; win?: boolean }): Promise<void> {
+  private async flushClient(client: ArenaClient, opts: { left?: boolean; win?: boolean; countsAsMatch?: boolean }): Promise<void> {
     const data = client.userData;
     if (!data) return;
     const p = this.sim.players.get(client.sessionId);
@@ -814,6 +827,7 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
         chests: delta.chests,
         win: !!opts.win,
         left: !!opts.left,
+        countsAsMatch: !!opts.countsAsMatch,
       });
       for (const q of res.completedQuests) client.send("quest_complete", { questKey: q.key, name: q.name });
     } catch (err) {

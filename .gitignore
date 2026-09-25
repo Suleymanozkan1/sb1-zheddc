@@ -12,3 +12,6 @@ packages/database/src/generated/
 *.tsbuildinfo
 secrets/
 *.keypair.json
+graphify-out/
+test-results/
+playwright-report/

@@ -36,7 +36,11 @@ describe("deposits", () => {
     land(a.deposit, a.wallet.address, sig);
     await verifyDeposit(c, gw, a.user.id, a.deposit.id, sig);
     const { deposit: another } = await prepareDeposit(c, gw, a.user.id, 5_000_000n);
-    await expect(verifyDeposit(c, gw, a.user.id, another.id, sig)).rejects.toMatchObject({ code: "DUPLICATE_TRANSACTION" });
+    const err = await verifyDeposit(c, gw, a.user.id, another.id, sig).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(AppError);
+    expect(["DUPLICATE_TRANSACTION", "VERIFICATION_FAILED"]).toContain((err as AppError).code);
+    expect((await getUserBalances(c.prisma, a.user.id)).cryptoSpendable).toBe(5_000_000n);
+    expect((await c.prisma.deposit.findUniqueOrThrow({ where: { id: another.id } })).status).not.toBe("CREDITED");
   });
 
   it("fails deposits with the wrong amount or mint and never credits them", async () => {
@@ -70,5 +74,22 @@ describe("deposits", () => {
     await expect(prepareDeposit(c, gw, user.id, 1n)).rejects.toMatchObject({ code: "LIMIT_EXCEEDED" });
     const { user: noWallet } = await makeUser(c, { wallet: false });
     await expect(prepareDeposit(c, gw, noWallet.id, 5_000_000n)).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+});
+
+describe("deposit signature squatting", () => {
+  const c = ctx();
+  const gw = new MockSolanaGateway("devnet");
+
+  it("refuses to bind someone else's transaction and keeps it usable by its owner", async () => {
+    const victim = await makeUser(c);
+    const attacker = await makeUser(c);
+    const { deposit: vd } = await prepareDeposit(c, gw, victim.user.id, 5_000_000n);
+    const { deposit: ad } = await prepareDeposit(c, gw, attacker.user.id, 5_000_000n);
+    const sig = `mock${randomAddress()}`;
+    gw.recordTransfer({ signature: sig, payer: victim.wallet!.address, mint: vd.mint, amount: vd.amount, recipientTokenAccount: vd.recipient, recipientOwner: c.config.TREASURY_PUBLIC_KEY, reference: vd.reference });
+    await expect(verifyDeposit(c, gw, attacker.user.id, ad.id, sig)).rejects.toMatchObject({ code: "VERIFICATION_FAILED" });
+    const res = await verifyDeposit(c, gw, victim.user.id, vd.id, sig);
+    expect(res.status).toBe("CREDITED");
   });
 });

@@ -32,7 +32,7 @@
     "admin:grant": "tsx scripts/grant-admin.ts",
     "postinstall": "prisma generate",
     "test:e2e": "playwright test",
-    "graph": "graphify update apps && graphify update packages"
+    "graph": "node scripts/graph.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -62,6 +62,8 @@
     "fastify": "^5.12.5",
     "@cryptoarena/observability": "workspace:*",
     "@cryptoarena/validation": "workspace:*",
-    "ioredis": "^5.11.1"
+    "ioredis": "^5.11.1",
+    "@types/pg": "^8.23.1",
+    "esbuild": "^0.28.2"
   }
 }

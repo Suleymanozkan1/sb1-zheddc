@@ -95,6 +95,13 @@ export async function verifyDeposit(ctx: EconomyContext, gateway: SolanaGateway,
   if (deposit.status === "FAILED") throw new AppError("VERIFICATION_FAILED", deposit.failureReason ?? "Deposit failed");
   if (deposit.signature && deposit.signature !== signature) throw new AppError("CONFLICT", "A different transaction was already submitted for this deposit");
 
+  // If the transaction is already visible, make sure it belongs to THIS deposit before binding it,
+  // so nobody can squat someone else's (public) signature on their own deposit.
+  const visible = await gateway.getTransaction(signature, "confirmed");
+  if (visible && (!visible.accountKeys.includes(deposit.reference) || !visible.signers.includes(deposit.wallet.address))) {
+    throw new AppError("VERIFICATION_FAILED", "This transaction does not belong to this deposit");
+  }
+
   // Bind the signature to this deposit. The unique index prevents replaying one transaction for two deposits.
   if (!deposit.signature) {
     try {
@@ -130,6 +137,12 @@ export async function settleDeposit(ctx: EconomyContext, gateway: SolanaGateway,
 
   if (!result.ok) {
     if (result.retryable) return { status: "SUBMITTED", deposit, reason: result.reason };
+    if (tx && (!tx.accountKeys.includes(deposit.reference) || !tx.signers.includes(deposit.wallet.address))) {
+      // Foreign transaction: release the signature so its real owner can still use it.
+      const released = await ctx.prisma.deposit.update({ where: { id: deposit.id }, data: { signature: null, status: "AWAITING_SIGNATURE", failureReason: result.reason } });
+      ctx.logger.warn({ event: LogEvent.DEPOSIT_REJECTED, depositId, reason: result.reason }, "foreign transaction released");
+      return { status: "FAILED", deposit: released, reason: result.reason };
+    }
     const failed = await ctx.prisma.deposit.update({ where: { id: deposit.id }, data: { status: "FAILED", failureReason: result.reason } });
     ctx.logger.warn({ event: LogEvent.DEPOSIT_REJECTED, depositId, reason: result.reason }, "deposit rejected");
     return { status: "FAILED", deposit: failed, reason: result.reason };

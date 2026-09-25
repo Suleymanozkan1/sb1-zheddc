@@ -412,7 +412,8 @@ export class ArenaScene extends Phaser.Scene {
       // Hit flash (Phaser 4 tint modes replace v3's setTintFill).
       target.body.setTint(0xffffff).setTintMode(Phaser.TintModes.FILL);
       this.time.delayedCall(70, () => {
-        if (target.body.active) target.body.setTintMode(Phaser.TintModes.MULTIPLY).setTint(target.baseTint);
+        // `active` is false for children of a Container; a destroyed object has no scene.
+        if (target.body.scene) target.body.setTintMode(Phaser.TintModes.MULTIPLY).setTint(target.baseTint);
       });
       if (m.targetId === me && settings.screenShake) this.cameras.main.shake(90, 0.004);
     });

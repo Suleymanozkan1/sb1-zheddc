@@ -88,7 +88,10 @@ const CSRF_EXEMPT = new Set(["/api/auth/nonce", "/api/auth/verify", "/api/auth/g
 export function checkCsrf(req: FastifyRequest): void {
   if (["GET", "HEAD", "OPTIONS"].includes(req.method)) return;
   const path = req.url.split("?")[0] ?? "";
-  if (!path.startsWith("/api/") || CSRF_EXEMPT.has(path)) return;
+  if (!path.startsWith("/api/")) return;
+  // Login endpoints are exempt only when no session exists yet (a signed-in guest could otherwise be
+  // CSRF-linked to an attacker's wallet via /api/auth/verify).
+  if (CSRF_EXEMPT.has(path) && (!req.cookies[COOKIE_ACCESS] || path === "/api/auth/refresh")) return;
   // Bearer-token clients are not vulnerable to CSRF.
   if (req.headers.authorization?.startsWith("Bearer ") && !req.cookies[COOKIE_ACCESS]) return;
   const cookie = req.cookies[COOKIE_CSRF];
