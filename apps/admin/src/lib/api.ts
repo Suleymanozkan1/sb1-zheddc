@@ -58,15 +58,25 @@ function csrfToken(): string {
 
 let refreshing: Promise<boolean> | null = null;
 
+/** Resolves true once the CSRF cookie differs from `before` (the winning tab's rotation landed). */
+async function cookiesRotated(before: string, timeoutMs = 3_000): Promise<boolean> {
+  for (let waited = 0; waited < timeoutMs; waited += 100) {
+    if (csrfToken() !== before) return true;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return csrfToken() !== before;
+}
+
 async function refreshSession(): Promise<boolean> {
+  const before = csrfToken();
   refreshing ??= fetch(`${BASE}/api/auth/refresh`, {
     method: "POST",
     credentials: "include",
     headers: { "content-type": "application/json" },
     body: "{}",
   })
-    // 409: another tab refreshed first; the shared cookies are already rotated, so retry.
-    .then((r) => r.ok || r.status === 409)
+    // 409: another tab won the refresh race. Retry only once its rotated cookies have arrived.
+    .then((r) => (r.ok ? true : r.status === 409 ? cookiesRotated(before) : false))
     .catch(() => false)
     .finally(() => {
       refreshing = null;

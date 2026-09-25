@@ -48,7 +48,9 @@ export function GameView() {
       if (!conn) return;
       connRef.current = conn;
       conn.room.onLeave((code) => {
-        if (code !== 1000 && code !== 4000) useHud.getState().set({ error: `Disconnected (${code})` });
+        // 4011: the server released this seat (session moved to another arena or could not be verified).
+        if (code === 4011) useHud.getState().set({ error: "Your arena session ended because it could not be kept on this server. Please rejoin." });
+        else if (code !== 1000 && code !== 4000) useHud.getState().set({ error: `Disconnected (${code})` });
       });
       // Wait for the first full state (map seed) before booting Phaser.
       await new Promise<void>((resolve) => {

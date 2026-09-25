@@ -97,6 +97,8 @@ const RESERVATION_TTL_MS = 30_000;
 const SEAT_LEASE_MS = 45_000;
 const SEAT_RENEW_MS = 15_000;
 const SEAT_SAFETY_MS = 2_000;
+/** Close code for a player whose seat lease was lost (application range 4011–4999). */
+export const SEAT_LOST_CLOSE_CODE = 4011;
 
 function seatTaken(userId: string): boolean {
   const seat = activeUsers.get(userId);
@@ -153,6 +155,8 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
   private readonly playerStates = new Map<string, PlayerState>();
   private readonly npcStates = new Map<string, NpcState>();
   private readonly clientsBySim = new Map<string, ArenaClient>();
+  /** Sessions already removed from the simulation (eviction or leave); cleanup runs once. */
+  private readonly departed = new Set<string>();
   private ended = false;
 
   override async onCreate(options: { mode?: MatchMode }): Promise<void> {
@@ -238,6 +242,11 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
     const seat = activeUsers.get(claims.sub);
     // The lease may have been lost between onAuth and onJoin (renewal failure / takeover).
     if (!seat || seat.roomId !== this.roomId || seat.token !== seatToken) throw new Error("Your arena seat expired — please rejoin");
+    // Re-prove the database lease right before the character enters the simulation.
+    const renewStart = Date.now();
+    const renewed = await this.deps.persistence.renewSeats(this.roomId, [{ userId: claims.sub, token: seatToken }], SEAT_LEASE_MS);
+    if (!renewed.has(claims.sub) || activeUsers.get(claims.sub) !== seat) throw new Error("Your arena seat expired — please rejoin");
+    seat.leaseUntil = renewStart + SEAT_LEASE_MS;
     seat.joined = true;
     seat.at = Date.now();
     const recent = recentLeavers.get(claims.sub);
@@ -309,6 +318,14 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
   }
 
   override async onReconnect(client: ArenaClient): Promise<void> {
+    // An evicted seat must not resume through the reconnection window.
+    const sub = client.auth?.claims.sub;
+    const seat = sub ? activeUsers.get(sub) : undefined;
+    if (this.departed.has(client.sessionId) || !seat || seat.roomId !== this.roomId || seat.token !== client.auth?.seatToken) {
+      client.send("notice", { level: "error", message: "Your arena session could not be kept — please rejoin." });
+      client.leave(SEAT_LOST_CLOSE_CODE);
+      return;
+    }
     client.view = new StateView();
     const ps = this.playerStates.get(client.sessionId);
     if (ps) client.view.add(ps);
@@ -317,23 +334,35 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
   }
 
   override async onLeave(client: ArenaClient): Promise<void> {
+    await this.departPlayer(client);
+    const data = client.userData;
+    const seat = data ? activeUsers.get(data.userId) : undefined;
+    if (data && seat && seat.roomId === this.roomId) {
+      activeUsers.delete(data.userId);
+      if (seat.token) await this.deps.persistence.releaseSeat(data.userId, seat.token).catch((err: unknown) => this.deps.logger.warn({ err }, "failed to release game seat"));
+    }
+  }
+
+  /** Saves progress and removes the character from the simulation. Idempotent per session. */
+  private async departPlayer(client: ArenaClient): Promise<void> {
+    if (this.departed.has(client.sessionId)) return;
+    this.departed.add(client.sessionId);
     const data = client.userData;
     const p = this.sim.players.get(client.sessionId);
     if (p && data) {
       // Remember HP and cooldowns briefly so leaving/rejoining cannot be used to reset them.
       pruneExpired();
       recentLeavers.set(data.userId, { hpFraction: p.alive ? p.hp / p.stats.maxHp : 0.5, cooldowns: this.sim.cooldownsOf(p), until: Date.now() + 60_000 });
+      // flushClient snapshots progress synchronously before its first await, so the character can
+      // leave the world immediately while the save completes.
       // A session only counts as a played match after 60s (prevents join/leave quest farming).
-      await this.flushClient(client, { left: true, countsAsMatch: Date.now() - data.joinedAt >= 60_000 });
+      const saving = this.flushClient(client, { left: true, countsAsMatch: Date.now() - data.joinedAt >= 60_000 });
+      this.sim.removePlayer(client.sessionId);
+      await saving;
       this.broadcastNear(p.x, p.y, "player_leave", { id: p.id, name: p.name });
     }
     this.sim.removePlayer(client.sessionId);
     this.clientsBySim.delete(client.sessionId);
-    const seat = data ? activeUsers.get(data.userId) : undefined;
-    if (data && seat && seat.roomId === this.roomId) {
-      activeUsers.delete(data.userId);
-      if (seat.token) await this.deps.persistence.releaseSeat(data.userId, seat.token).catch((err: unknown) => this.deps.logger.warn({ err }, "failed to release game seat"));
-    }
     this.state.playerCount = this.humanCount();
     metrics.activePlayers.dec();
     if (data) this.deps.logger.info({ event: LogEvent.PLAYER_LEFT, roomId: this.roomId, userId: data.userId }, "player left");
@@ -380,10 +409,14 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
     // Best effort: an unverified lease may still be ours; freeing it lets the player rejoin at once.
     if (why === "unverified" && token) void this.deps.persistence.releaseSeat(userId, token).catch(() => undefined);
     this.deps.logger.warn({ roomId: this.roomId, userId, why }, "game seat lease lost; disconnecting player");
-    for (const client of this.clients) {
-      if (client.userData?.userId !== userId && client.auth?.claims.sub !== userId) continue;
+    // Covers connected clients and ones inside the reconnection window (tracked in clientsBySim).
+    const targets = new Set<ArenaClient>();
+    for (const client of this.clientsBySim.values()) if (client.userData?.userId === userId) targets.add(client);
+    for (const client of this.clients) if (client.userData?.userId === userId || client.auth?.claims.sub === userId) targets.add(client);
+    for (const client of targets) {
+      void this.departPlayer(client).catch((err: unknown) => this.deps.logger.error({ err }, "failed to remove evicted player"));
       client.send("notice", { level: "error", message: "Your arena session could not be kept — please rejoin." });
-      client.leave(4001);
+      client.leave(SEAT_LOST_CLOSE_CODE);
     }
   }
 
