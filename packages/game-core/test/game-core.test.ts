@@ -8,8 +8,11 @@ import {
   StaticGrid,
   buildItemCatalog,
   computeCombatStats,
+  damageShares,
   generateArena,
   getCharacterDef,
+  rankedRewardScaleBps,
+  repeatKillScaleBps,
   isValidSeq,
   itemUpgradeCost,
   levelFromXp,
@@ -158,5 +161,30 @@ describe("anti-cheat heuristics", () => {
       human.record(t, Math.sin(i), true);
     }
     expect(human.score()).toBeLessThan(0.8);
+  });
+});
+
+describe("reward anti-farming rules", () => {
+  it("scales ranked rewards with the number of real players", () => {
+    expect(rankedRewardScaleBps(2, 6, 12)).toBe(0); // two-account farming pays nothing
+    expect(rankedRewardScaleBps(5, 6, 12)).toBe(0);
+    expect(rankedRewardScaleBps(6, 6, 12)).toBe(5_000);
+    expect(rankedRewardScaleBps(9, 6, 12)).toBe(7_500);
+    expect(rankedRewardScaleBps(12, 6, 12)).toBe(10_000);
+    expect(rankedRewardScaleBps(20, 6, 12)).toBe(10_000);
+  });
+
+  it("halves repeat kill rewards for the same victim", () => {
+    expect([0, 1, 2, 3].map((n) => repeatKillScaleBps(n, 5_000))).toEqual([10_000, 5_000, 2_500, 1_250]);
+    expect(repeatKillScaleBps(3, 10_000)).toBe(10_000); // decay disabled
+  });
+
+  it("splits boss rewards by damage share above the minimum", () => {
+    const shares = damageShares(new Map([["a", 600], ["b", 360], ["c", 40], ["d", 0]]), 500);
+    expect(shares).toEqual([
+      { id: "a", shareBps: 6_000 },
+      { id: "b", shareBps: 3_600 },
+    ]); // "c" dealt 4 % (< 5 %) and is excluded; its share is not redistributed
+    expect(damageShares(new Map(), 500)).toEqual([]);
   });
 });

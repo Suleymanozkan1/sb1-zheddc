@@ -10,3 +10,4 @@ export * from "./movement";
 export * from "./npcs";
 export * from "./items";
 export * from "./anticheat";
+export * from "./rewardRules";

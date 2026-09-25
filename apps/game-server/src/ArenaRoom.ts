@@ -9,9 +9,11 @@ import {
   RateWindow,
   VIEW_RADIUS_X,
   VIEW_RADIUS_Y,
+  damageShares,
   dist2,
   getCharacterDef,
   levelProgress,
+  rankedRewardScaleBps,
 } from "@cryptoarena/game-core";
 import { LogEvent, metrics, type Logger } from "@cryptoarena/observability";
 import type {
@@ -58,6 +60,8 @@ interface Progress {
 
 interface ClientData {
   userId: string;
+  /** Guest accounts earn no crypto and do not count as PvP reward victims. */
+  isGuest: boolean;
   userCharacterId: string;
   inputRate: RateWindow;
   actionRate: RateWindow;
@@ -275,6 +279,7 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
 
     client.userData = {
       userId: claims.sub,
+      isGuest: loaded.user.isGuest,
       userCharacterId: c.userCharacterId,
       inputRate: new RateWindow(MAX_INPUTS_PER_SECOND),
       actionRate: new RateWindow(8),
@@ -732,6 +737,9 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
 
     // Crypto kill reward: real players only, anti-farming cooldown per (killer, victim) pair.
     if (victim.isBot || killer.player.isBot || victim.userId === killer.player.userId) return;
+    // Victims must be established accounts: no guests (free to create) and a minimum level.
+    const victimData = vc?.userData;
+    if (!victimData || victimData.isGuest || victim.level < this.deps.config.PVP_REWARD_MIN_VICTIM_LEVEL) return;
     const pairKey = `${killer.player.userId}:${victim.userId}`;
     const last = pvpKillLog.get(pairKey) ?? 0;
     if (Date.now() - last < this.deps.config.PVP_SAME_VICTIM_COOLDOWN_SECONDS * 1000) return;
@@ -740,16 +748,20 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
 
     const ratio = Math.max(0.5, Math.min(2, victim.level / Math.max(1, killer.player.level)));
     void this.deps.persistence
-      .reward({
-        userId: killer.player.userId,
-        source: "KILL",
-        asset: "CRYPTO",
-        baseAmount: this.deps.config.KILL_REWARD_BASE,
-        performanceBps: Math.round(ratio * 10_000),
-        eventBps: this.mode === "RANKED" ? 12_000 : 10_000,
-        idempotencyKey: `kill:${this.matchId}:${killer.player.userId}:${victim.userId}:${killer.player.kills}`,
-        matchId: this.matchId,
-      })
+      .rewardPvpKill(
+        {
+          userId: killer.player.userId,
+          source: "KILL",
+          asset: "CRYPTO",
+          baseAmount: this.deps.config.KILL_REWARD_BASE,
+          performanceBps: Math.round(ratio * 10_000),
+          eventBps: this.mode === "RANKED" ? 12_000 : 10_000,
+          idempotencyKey: `kill:${killer.player.userId}:${victim.userId}:${this.matchId}:${killer.player.kills}`,
+          matchId: this.matchId,
+        },
+        victim.userId,
+        this.deps.config.PVP_REPEAT_DECAY_BPS,
+      )
       .then((r) => {
         if (r.amount > 0n) kc.send("reward_granted", { source: "KILL", asset: "CRYPTO", amount: r.amount.toString(), reason: r.reason });
       })
@@ -764,12 +776,28 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
     }
     if (npc.def.key === "titan") {
       this.broadcast("player_death", { killerId: killer.id, killerName: killer.name, victimId: npc.id, victimName: npc.def.name, victimIsNpc: true, respawnAt: 0 });
-      if (kc?.userData && !killer.isBot) {
-        const unit = 10n ** BigInt(this.deps.config.REWARD_TOKEN_DECIMALS);
+      // Split by damage share among real players above the minimum share; daily per-user limit.
+      const cfg = this.deps.config;
+      for (const { id, shareBps } of damageShares(npc.damageBy, cfg.TITAN_MIN_DAMAGE_SHARE_BPS)) {
+        const p = this.sim.players.get(id);
+        const client = this.clientsBySim.get(id);
+        if (!p || p.isBot || !client?.userData || client.userData.isGuest) continue;
         void this.deps.persistence
-          .reward({ userId: killer.userId, source: "EVENT", asset: "CRYPTO", baseAmount: 5n * unit, idempotencyKey: `titan:${this.matchId}:${npc.id}`, matchId: this.matchId, reason: "Crystal Titan slain" })
+          .rewardBoss(
+            {
+              userId: p.userId,
+              source: "EVENT",
+              asset: "CRYPTO",
+              baseAmount: cfg.TITAN_REWARD_BASE,
+              performanceBps: shareBps,
+              idempotencyKey: `titan:${p.userId}:${this.matchId}:${npc.id}`,
+              matchId: this.matchId,
+              reason: `Crystal Titan slain (${(shareBps / 100).toFixed(0)}% of damage)`,
+            },
+            cfg.TITAN_REWARDS_PER_USER_DAY,
+          )
           .then((r) => {
-            if (r.amount > 0n) kc.send("reward_granted", { source: "EVENT", asset: "CRYPTO", amount: r.amount.toString(), reason: r.reason });
+            if (r && r.amount > 0n) client.send("reward_granted", { source: "EVENT", asset: "CRYPTO", amount: r.amount.toString(), reason: r.reason });
           })
           .catch((err: unknown) => this.deps.logger.error({ err }, "titan reward failed"));
       }
@@ -1026,17 +1054,18 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
       if (s.placement === 1) winnerUserId = p.userId;
     }
 
+    // Ranked crypto needs a real lobby: nothing below RANKED_REWARD_MIN_HUMANS, scaled up to FULL.
+    const rankedScaleBps = rankedRewardScaleBps(placements.length, this.deps.config.RANKED_REWARD_MIN_HUMANS, this.deps.config.RANKED_REWARD_FULL_HUMANS);
     for (const client of this.clients) {
       const p = this.sim.players.get(client.sessionId);
       const placement = standings.find((s) => s.id === client.sessionId)?.placement ?? 99;
       const win = ranked && placement === 1 && !!p && p.score > 0;
       await this.flushClient(client, { win });
       // Tournament reward for the top 3 of a ranked match (performance-based, budget-capped).
-      if (ranked && p && !p.isBot && placement <= 3 && p.score > 0 && client.userData) {
-        const unit = 10n ** BigInt(this.deps.config.REWARD_TOKEN_DECIMALS);
+      if (ranked && rankedScaleBps > 0 && p && !p.isBot && placement <= 3 && p.score > 0 && client.userData && !client.userData.isGuest) {
         const share = placement === 1 ? 10_000 : placement === 2 ? 6_000 : 3_000;
         const r = await this.deps.persistence
-          .reward({ userId: p.userId, source: "TOURNAMENT", asset: "CRYPTO", baseAmount: 2n * unit, performanceBps: share, idempotencyKey: `ranked:${this.matchId}:${p.userId}`, matchId: this.matchId, reason: `Ranked placement #${placement}` })
+          .reward({ userId: p.userId, source: "TOURNAMENT", asset: "CRYPTO", baseAmount: this.deps.config.RANKED_REWARD_BASE, performanceBps: share, eventBps: rankedScaleBps, idempotencyKey: `ranked:${this.matchId}:${p.userId}`, matchId: this.matchId, reason: `Ranked placement #${placement}` })
           .catch(() => null);
         if (r && r.amount > 0n) client.send("reward_granted", { source: "TOURNAMENT", asset: "CRYPTO", amount: r.amount.toString(), reason: r.reason });
       }

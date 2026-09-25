@@ -64,6 +64,17 @@ async function sumCryptoRewards(tx: Tx, since: Date, userId?: string): Promise<b
   return agg._sum.amount ?? 0n;
 }
 
+/**
+ * Number of paid (GRANTED/CAPPED) rewards a user received today whose idempotency key starts with
+ * `keyPrefix`. Used by per-day anti-farming rules (repeat kills, boss rewards). Call it inside the
+ * same serialized per-user queue as the grant so the count cannot race.
+ */
+export async function countRewardsToday(tx: Tx, userId: string, keyPrefix: string): Promise<number> {
+  return tx.reward.count({
+    where: { userId, idempotencyKey: { startsWith: keyPrefix }, status: { in: ["GRANTED", "CAPPED"] }, createdAt: { gte: startOfUtcDay() } },
+  });
+}
+
 export async function grantReward(tx: Tx, config: AppConfig, logger: Logger, input: RewardInput): Promise<RewardResult> {
   const existing = await tx.reward.findUnique({ where: { idempotencyKey: input.idempotencyKey } });
   if (existing) {

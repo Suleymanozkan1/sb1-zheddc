@@ -28,4 +28,9 @@ describe("config guards", () => {
     expect(() => parseConfig({ ...base, WITHDRAWAL_FEE: "5000000", MIN_WITHDRAWAL: "5000000" })).toThrow();
     expect(parseConfig({ ...base }).MIN_WITHDRAWAL).toBeTypeOf("bigint");
   });
+
+  it("validates ranked reward lobby thresholds", () => {
+    expect(() => parseConfig({ ...base, RANKED_REWARD_MIN_HUMANS: "8", RANKED_REWARD_FULL_HUMANS: "6" })).toThrow(/RANKED_REWARD/);
+    expect(parseConfig(base).USER_DAILY_REWARD_CAP).toBe(100_000_000n);
+  });
 });

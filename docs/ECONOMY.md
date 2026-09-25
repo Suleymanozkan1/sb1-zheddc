@@ -45,6 +45,18 @@ A crypto reward is the minimum of the multiplied amount and:
 The pool row is locked first, so concurrent grants cannot exceed budgets. Result status is
 `GRANTED`, `CAPPED` or `REJECTED` (with reason) and is stored with the multipliers used.
 
+### Anti-farming rules (game server)
+
+* **PvP kills** pay crypto only when the victim is a non-guest account at or above
+  `PVP_REWARD_MIN_VICTIM_LEVEL`, at most once per `PVP_SAME_VICTIM_COOLDOWN_SECONDS` per pair, and each
+  earlier paid kill of the same victim today multiplies the next by `PVP_REPEAT_DECAY_BPS`.
+* **Ranked top 3** pays only with at least `RANKED_REWARD_MIN_HUMANS` real players, scaled 50 % → 100 %
+  up to `RANKED_REWARD_FULL_HUMANS`.
+* **Crystal Titan** pays `TITAN_REWARD_BASE` split by damage share among contributors with at least
+  `TITAN_MIN_DAMAGE_SHARE_BPS`, and at most `TITAN_REWARDS_PER_USER_DAY` boss rewards per user per day.
+* Per-day counts are read from the `Reward` table inside the user's serialized persistence queue, so
+  they hold across rooms and processes. See `docs/ECONOMY_BALANCE.md` for the numbers.
+
 ## Premium
 
 FREE / VIP / ELITE passes grant XP boosts, extra quests (premium-gated quests), inventory slots and

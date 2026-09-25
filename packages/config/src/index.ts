@@ -81,14 +81,26 @@ export const envSchema = z.object({
   WITHDRAWAL_REVIEW_THRESHOLD: bigintStr.prefault("200000000"),
   WITHDRAWAL_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(50).default(8),
   WITHDRAWAL_RISK_SCORE_REVIEW: z.coerce.number().int().min(0).default(50),
-  /** Daily crypto reward budget across all players. */
-  REWARD_POOL: bigintStr.prefault("50000000000"),
+  /** Daily crypto reward budget across all players (default ≈ season pool / 60 days). */
+  REWARD_POOL: bigintStr.prefault("16000000000"),
   /** Season crypto reward pool used when bootstrapping a season. */
   SEASON_REWARD_POOL: bigintStr.prefault("1000000000000"),
-  /** Per-user daily crypto reward cap (anti-farming). */
-  USER_DAILY_REWARD_CAP: bigintStr.prefault("2000000000"),
+  /** Per-user daily crypto reward cap (anti-farming; ~2x a hardcore player's legit earnings). */
+  USER_DAILY_REWARD_CAP: bigintStr.prefault("100000000"),
   KILL_REWARD_BASE: bigintStr.prefault("200000"),
   PVP_SAME_VICTIM_COOLDOWN_SECONDS: z.coerce.number().int().min(0).default(600),
+  /** PvP kills pay crypto only for non-guest victims at or above this level. */
+  PVP_REWARD_MIN_VICTIM_LEVEL: z.coerce.number().int().min(1).default(5),
+  /** Each earlier reward today for the same killer→victim pair multiplies the next one by this (bps). */
+  PVP_REPEAT_DECAY_BPS: z.coerce.number().int().min(0).max(10_000).default(5_000),
+  /** Ranked top-3 base reward; paid only with enough real players (scaled 50 % → 100 %). */
+  RANKED_REWARD_BASE: bigintStr.prefault("2000000"),
+  RANKED_REWARD_MIN_HUMANS: z.coerce.number().int().min(2).default(6),
+  RANKED_REWARD_FULL_HUMANS: z.coerce.number().int().min(2).default(12),
+  /** Crystal Titan reward, split by damage share among contributors above the minimum share. */
+  TITAN_REWARD_BASE: bigintStr.prefault("5000000"),
+  TITAN_MIN_DAMAGE_SHARE_BPS: z.coerce.number().int().min(0).max(10_000).default(500),
+  TITAN_REWARDS_PER_USER_DAY: z.coerce.number().int().min(0).default(3),
   BLOCKED_COUNTRIES: z.string().default(""),
   MIN_AGE: z.coerce.number().int().min(0).default(18),
   REQUIRE_KYC_FOR_WITHDRAWAL: bool.default(false),
@@ -138,6 +150,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): AppConfig {
   }
   if (c.MIN_WITHDRAWAL > c.MAX_WITHDRAWAL) throw new ConfigError("MIN_WITHDRAWAL must be <= MAX_WITHDRAWAL");
   if (c.WITHDRAWAL_FEE >= c.MIN_WITHDRAWAL) throw new ConfigError("WITHDRAWAL_FEE must be < MIN_WITHDRAWAL");
+  if (c.RANKED_REWARD_FULL_HUMANS < c.RANKED_REWARD_MIN_HUMANS) throw new ConfigError("RANKED_REWARD_FULL_HUMANS must be >= RANKED_REWARD_MIN_HUMANS");
 
   return {
     ...c,

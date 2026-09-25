@@ -9,6 +9,7 @@ import {
   addMatchPlayer,
   consumeItem,
   countItem,
+  countRewardsToday,
   createMatch,
   endMatch,
   equipItem,
@@ -24,7 +25,7 @@ import {
   type PlayerProgressDelta,
   type RewardResult,
 } from "@cryptoarena/economy";
-import type { LootCandidate } from "@cryptoarena/game-core";
+import { repeatKillScaleBps, type LootCandidate } from "@cryptoarena/game-core";
 import type { Logger } from "@cryptoarena/observability";
 import type { MatchMode } from "@cryptoarena/shared";
 
@@ -141,6 +142,35 @@ export class Persistence {
 
   reward(input: Parameters<typeof grantReward>[3]): Promise<RewardResult> {
     return this.enqueue(input.userId, () => withTransaction(this.prisma, (tx) => grantReward(tx, this.config, this.logger, input)));
+  }
+
+  /**
+   * PvP kill reward with diminishing returns: every paid kill of the same victim today multiplies the
+   * next one by `decayBps`. Runs in the killer's serialized queue, so the count cannot race.
+   * The idempotency key must start with `kill:<killer>:<victim>:`.
+   */
+  rewardPvpKill(input: Parameters<typeof grantReward>[3], victimUserId: string, decayBps: number): Promise<RewardResult> {
+    return this.enqueue(input.userId, () =>
+      withTransaction(this.prisma, async (tx) => {
+        const prior = await countRewardsToday(tx, input.userId, `kill:${input.userId}:${victimUserId}:`);
+        const scale = repeatKillScaleBps(prior, decayBps);
+        const performanceBps = Math.round(((input.performanceBps ?? 10_000) * scale) / 10_000);
+        return grantReward(tx, this.config, this.logger, { ...input, performanceBps });
+      }),
+    );
+  }
+
+  /**
+   * Boss reward limited to `maxPerDay` paid boss rewards per user (keys starting with `titan:`).
+   * Returns null when the daily limit is reached.
+   */
+  rewardBoss(input: Parameters<typeof grantReward>[3], maxPerDay: number): Promise<RewardResult | null> {
+    return this.enqueue(input.userId, () =>
+      withTransaction(this.prisma, async (tx) => {
+        if ((await countRewardsToday(tx, input.userId, "titan:")) >= maxPerDay) return null;
+        return grantReward(tx, this.config, this.logger, input);
+      }),
+    );
   }
 
   consumePotion(userId: string) {

@@ -169,9 +169,12 @@ All values live in `.env` (copy of [`.env.example`](.env.example)); every variab
 | `MIN_WITHDRAWAL`, `MAX_WITHDRAWAL`, `DAILY_WITHDRAWAL_LIMIT`, `WITHDRAWAL_FEE` | 5, 500, 1000, 0.1 tokens | Withdrawal limits (base units) |
 | `WITHDRAWAL_COOLDOWN_SECONDS`, `WITHDRAWAL_MIN_ACCOUNT_AGE_HOURS` | 3600, 24 | Velocity controls |
 | `WITHDRAWAL_REVIEW_THRESHOLD`, `WITHDRAWAL_RISK_SCORE_REVIEW`, `WITHDRAWAL_MAX_ATTEMPTS` | 200 tokens, 50, 8 | Manual review & retry policy |
-| `REWARD_POOL` | 50 000 tokens | Global **daily** crypto reward budget |
+| `REWARD_POOL` | 16 000 tokens | Global **daily** crypto reward budget (≈ season pool / 60 days) |
 | `SEASON_REWARD_POOL` | 1 000 000 tokens | Pool funded when a season starts |
-| `USER_DAILY_REWARD_CAP`, `KILL_REWARD_BASE`, `PVP_SAME_VICTIM_COOLDOWN_SECONDS` | 2000, 0.2 tokens, 600 | Anti-farming |
+| `USER_DAILY_REWARD_CAP`, `KILL_REWARD_BASE`, `PVP_SAME_VICTIM_COOLDOWN_SECONDS` | 100, 0.2 tokens, 600 | Anti-farming |
+| `PVP_REWARD_MIN_VICTIM_LEVEL`, `PVP_REPEAT_DECAY_BPS` | 5, 5000 | PvP crypto only for non-guest victims ≥ level 5; repeat kills of the same victim halve per day |
+| `RANKED_REWARD_BASE`, `RANKED_REWARD_MIN_HUMANS`, `RANKED_REWARD_FULL_HUMANS` | 2 tokens, 6, 12 | Ranked top-3 crypto needs ≥ 6 real players (50 % → 100 % at 12) |
+| `TITAN_REWARD_BASE`, `TITAN_MIN_DAMAGE_SHARE_BPS`, `TITAN_REWARDS_PER_USER_DAY` | 5 tokens, 500, 3 | World boss reward split by damage share (≥ 5 %), max 3 per user per day |
 | `BLOCKED_COUNTRIES`, `MIN_AGE`, `REQUIRE_KYC_FOR_WITHDRAWAL`, `GEO_COUNTRY_HEADER` | — | Compliance hooks |
 | `VITE_API_URL`, `VITE_GAME_URL`, `VITE_SOLANA_NETWORK`, `VITE_SOLANA_RPC_URL` | | Browser build-time values (never secrets) |
 
