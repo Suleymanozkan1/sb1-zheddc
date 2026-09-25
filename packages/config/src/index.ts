@@ -32,6 +32,10 @@ export const envSchema = z.object({
   COOKIE_DOMAIN: z.string().optional().default(""),
   PUBLIC_WEB_ORIGINS: z.string().default("http://localhost:5173,http://localhost:5174"),
   ALLOW_GUESTS: bool.default(true),
+  /** Header set by a trusted edge proxy with the client's ISO country (e.g. cf-ipcountry). Empty = disabled. */
+  GEO_COUNTRY_HEADER: z.string().default(""),
+  /** Number of trusted reverse proxies in front of the API (for client IP resolution). */
+  TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(5).default(0),
 
   API_HOST: z.string().default("0.0.0.0"),
   API_PORT: z.coerce.number().int().default(3000),

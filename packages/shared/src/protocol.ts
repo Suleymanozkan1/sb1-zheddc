@@ -35,7 +35,8 @@ export interface ClientMessages {
   player_move: PlayerMoveInput;
   pickup: { targetId?: string };
   buy_item: { sku: string };
-  use_item: { inventoryItemId: string };
+  /** Without an id the server drinks a health potion. */
+  use_item: { inventoryItemId?: string };
   equip_item: { inventoryItemId: string };
   ping: { t: number };
 }

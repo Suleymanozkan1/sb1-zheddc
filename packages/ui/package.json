@@ -4,11 +4,17 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.tsx",
+    "./theme.css": "./src/theme.css"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json"
   },
-  "dependencies": {"clsx": "^2.1.1", "react": "^19.3.0"},
-  "devDependencies": {"@types/react": "^19.3.0"}
+  "dependencies": {
+    "@cryptoarena/shared": "workspace:*",
+    "react": "^19.3.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0"
+  }
 }

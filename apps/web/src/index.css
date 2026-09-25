@@ -1,0 +1,12 @@
+@import "tailwindcss";
+@import "@cryptoarena/ui/theme.css";
+@source "../../../packages/ui/src";
+
+.wallet-adapter-button {
+  font-family: var(--font-sans);
+  border-radius: 0.75rem;
+}
+.wallet-adapter-modal-wrapper {
+  background: #0f1226;
+  border: 1px solid rgb(255 255 255 / 0.1);
+}

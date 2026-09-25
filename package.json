@@ -53,6 +53,8 @@
     "@cryptoarena/blockchain": "workspace:*",
     "@solana/kit": "^8.3.0",
     "@solana-program/token": "^0.17.0",
-    "@solana-program/system": "^0.15.0"
+    "@solana-program/system": "^0.15.0",
+    "@colyseus/sdk": "^0.18.4",
+    "@playwright/test": "^1.63.0"
   }
 }
