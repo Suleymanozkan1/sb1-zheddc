@@ -337,3 +337,29 @@ export function generateHeroTextures(scene: Phaser.Scene): void {
     canvasTexture(scene, `hero_${key}`, HERO_SIZE, HERO_SIZE, (ctx) => draw(ctx));
   }
 }
+
+const portraitCache = new Map<string, string>();
+
+/**
+ * Renders a hero sprite outside Phaser (menus, cards) as a PNG data URL, rotated to face up.
+ * `scale` draws at a higher resolution so large showcases stay sharp.
+ */
+export function heroImage(cls: string, scale = 2): string {
+  const key = `${cls}@${scale}`;
+  const cached = portraitCache.get(key);
+  if (cached) return cached;
+  const draw = DRAW[cls] ?? warrior;
+  const canvas = document.createElement("canvas");
+  canvas.width = HERO_SIZE * scale;
+  canvas.height = HERO_SIZE * scale;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return "";
+  ctx.scale(scale, scale);
+  ctx.translate(C, C);
+  ctx.rotate(-Math.PI / 2);
+  ctx.translate(-C, -C);
+  draw(ctx);
+  const url = canvas.toDataURL("image/png");
+  portraitCache.set(key, url);
+  return url;
+}
