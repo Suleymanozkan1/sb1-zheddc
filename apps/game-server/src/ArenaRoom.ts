@@ -250,6 +250,8 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
     const renewStart = Date.now();
     const renewed = await this.deps.persistence.renewSeats(this.roomId, [{ userId: claims.sub, token: seatToken }], SEAT_LEASE_MS);
     if (!renewed.has(claims.sub) || activeUsers.get(claims.sub) !== seat) throw new Error("Your arena seat expired — please rejoin");
+    // The client may have disconnected while the renewal was in flight: never add an unowned player.
+    if (this.departed.has(client.sessionId)) throw new Error("Client left during join");
     seat.leaseUntil = renewStart + SEAT_LEASE_MS;
     seat.joined = true;
     seat.at = Date.now();
@@ -294,6 +296,8 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
       lastFlushedDamage: 0,
       joinedAt: Date.now(),
     };
+    // Counted together with userData so departPlayer's decrement always pairs with this increment.
+    metrics.activePlayers.inc();
     this.clientsBySim.set(p.id, client);
     client.view = new StateView();
     const ps = this.playerStates.get(p.id);
@@ -308,7 +312,6 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
     this.sendSelfStats(client, true);
     this.broadcastNear(p.x, p.y, "player_join", { id: p.id, name: p.name });
     this.state.playerCount = this.humanCount();
-    metrics.activePlayers.inc();
     this.deps.logger.info({ event: LogEvent.PLAYER_JOINED, roomId: this.roomId, userId: claims.sub, character: c.characterKey }, "player joined");
     this.checkRankedStart();
   }
@@ -340,12 +343,13 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
 
   override async onLeave(client: ArenaClient): Promise<void> {
     await this.departPlayer(client);
-    const data = client.userData;
-    const seat = data ? activeUsers.get(data.userId) : undefined;
+    // The authenticated identity also covers a client that left before onJoin assigned userData.
+    const userId = client.userData?.userId ?? client.auth?.claims.sub;
+    const seat = userId ? activeUsers.get(userId) : undefined;
     // Only this session's own lease: a replacement session (evict + rejoin) holds a different token.
-    if (data && seat && seat.roomId === this.roomId && seat.token === client.auth?.seatToken) {
-      activeUsers.delete(data.userId);
-      if (seat.token) await this.deps.persistence.releaseSeat(data.userId, seat.token).catch((err: unknown) => this.deps.logger.warn({ err }, "failed to release game seat"));
+    if (userId && seat && seat.roomId === this.roomId && seat.token === client.auth?.seatToken) {
+      activeUsers.delete(userId);
+      if (seat.token) await this.deps.persistence.releaseSeat(userId, seat.token).catch((err: unknown) => this.deps.logger.warn({ err }, "failed to release game seat"));
     }
   }
 
@@ -370,8 +374,12 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
     this.sim.removePlayer(client.sessionId);
     this.clientsBySim.delete(client.sessionId);
     this.state.playerCount = this.humanCount();
-    metrics.activePlayers.dec();
-    if (data) this.deps.logger.info({ event: LogEvent.PLAYER_LEFT, roomId: this.roomId, userId: data.userId }, "player left");
+    // userData is assigned in onJoin together with the active-player metric; a client that left
+    // before joining was never counted.
+    if (data) {
+      metrics.activePlayers.dec();
+      this.deps.logger.info({ event: LogEvent.PLAYER_LEFT, roomId: this.roomId, userId: data.userId }, "player left");
+    }
   }
 
   override async onDispose(): Promise<void> {
