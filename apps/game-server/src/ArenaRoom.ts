@@ -74,7 +74,19 @@ interface ClientData {
 type ArenaClient = Client<{ userData: ClientData; auth: AuthData; messages: ServerMessages }>;
 
 // Process-wide registries (one game-server process). For multi-node deployments these move to Redis.
-const activeUsers = new Map<string, string>();
+/** userId → live (or reserved) seat. A reservation made in onAuth expires if the join never completes. */
+const activeUsers = new Map<string, { roomId: string; joined: boolean; at: number }>();
+const RESERVATION_TTL_MS = 30_000;
+
+function seatTaken(userId: string): boolean {
+  const seat = activeUsers.get(userId);
+  if (!seat) return false;
+  if (!seat.joined && Date.now() - seat.at > RESERVATION_TTL_MS) {
+    activeUsers.delete(userId);
+    return false;
+  }
+  return true;
+}
 const recentLeavers = new Map<string, { hpFraction: number; cooldowns: { attack: number; dash: number; skill: number; ultimate: number }; until: number }>();
 const pvpKillLog = new Map<string, number>();
 
@@ -174,14 +186,17 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
     const claims = await this.deps.tickets.verify(options?.ticket, this.mode);
     if (!claims) throw new Error("Invalid or expired game ticket");
     // One live character per account across all rooms (reconnections bypass onAuth).
-    if (activeUsers.has(claims.sub)) throw new Error("You are already playing in an arena");
+    // The seat is reserved synchronously, before any await, so concurrent joins cannot both pass.
+    if (seatTaken(claims.sub)) throw new Error("You are already playing in an arena");
     if (this.mode === "RANKED" && this.state.phase !== "waiting" && this.state.phase !== "countdown") {
       throw new Error("This ranked match already started");
     }
+    activeUsers.set(claims.sub, { roomId: this.roomId, joined: false, at: Date.now() });
     try {
       const loaded = await this.deps.persistence.loadPlayer(claims.sub, claims.uc);
       return { claims, loaded };
     } catch (err) {
+      activeUsers.delete(claims.sub);
       throw new Error(err instanceof AppError ? err.message : "Could not load your character", { cause: err });
     }
   }
@@ -189,7 +204,7 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
   override async onJoin(client: ArenaClient): Promise<void> {
     if (!client.auth) throw new Error("Not authenticated");
     const { claims, loaded } = client.auth;
-    activeUsers.set(claims.sub, this.roomId);
+    activeUsers.set(claims.sub, { roomId: this.roomId, joined: true, at: Date.now() });
     const recent = recentLeavers.get(claims.sub);
     const restore = recent && recent.until > Date.now() ? recent : undefined;
     recentLeavers.delete(claims.sub);
@@ -279,7 +294,7 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
     }
     this.sim.removePlayer(client.sessionId);
     this.clientsBySim.delete(client.sessionId);
-    if (data && activeUsers.get(data.userId) === this.roomId) activeUsers.delete(data.userId);
+    if (data && activeUsers.get(data.userId)?.roomId === this.roomId) activeUsers.delete(data.userId);
     this.state.playerCount = this.humanCount();
     metrics.activePlayers.dec();
     if (data) this.deps.logger.info({ event: LogEvent.PLAYER_LEFT, roomId: this.roomId, userId: data.userId }, "player left");
@@ -289,7 +304,7 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
     metrics.activeRooms.dec();
     if (!this.ended) await this.finishMatch(false);
     await this.deps.persistence.drain();
-    for (const [userId, roomId] of activeUsers) if (roomId === this.roomId) activeUsers.delete(userId);
+    for (const [userId, seat] of activeUsers) if (seat.roomId === this.roomId) activeUsers.delete(userId);
     this.deps.logger.info({ event: LogEvent.GAME_ENDED, roomId: this.roomId, matchId: this.matchId }, "game ended");
   }
 

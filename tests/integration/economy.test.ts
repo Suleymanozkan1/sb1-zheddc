@@ -1,5 +1,5 @@
 import { withTransaction } from "@cryptoarena/database";
-import { applyMultipliers, claimQuest, getUserBalances, grantReward, purchaseProduct, recordQuestProgress } from "@cryptoarena/economy";
+import { applyMultipliers, claimQuest, getUserBalances, grantReward, purchaseProduct, recordQuestProgress, refundPurchase } from "@cryptoarena/economy";
 import { describe, expect, it } from "vitest";
 import { creditGems, ctx, makeUser } from "./helpers";
 
@@ -81,5 +81,42 @@ describe("quests", () => {
     await withTransaction(c.prisma, (tx) => claimQuest(tx, c.config, c.logger, user.id, "ach_first_blood"));
     await expect(withTransaction(c.prisma, (tx) => claimQuest(tx, c.config, c.logger, user.id, "ach_first_blood"))).rejects.toThrow();
     await expect(withTransaction(c.prisma, (tx) => claimQuest(tx, c.config, c.logger, user.id, "daily_duelist"))).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+});
+
+describe("refunds", () => {
+  const c = ctx();
+
+  async function admin() {
+    const { user } = await makeUser(c);
+    return c.prisma.adminUser.create({ data: { userId: user.id, role: "SUPER_ADMIN" } });
+  }
+
+  it("revokes premium time and inventory slots together with the payment", async () => {
+    const a = await admin();
+    const { user } = await makeUser(c);
+    await creditGems(c, user.id, 1_000n);
+    const { purchase } = await withTransaction(c.prisma, (tx) => purchaseProduct(tx, c.config, c.logger, { userId: user.id, sku: "premium_vip_30", quantity: 1, idempotencyKey: k() }));
+    const bought = await c.prisma.user.findUniqueOrThrow({ where: { id: user.id } });
+    expect(bought.premiumTier).toBe("VIP");
+    expect(bought.inventorySlots).toBe(80);
+    await withTransaction(c.prisma, (tx) => refundPurchase(tx, c.logger, purchase.id, a.id, "test refund", null));
+    const refunded = await c.prisma.user.findUniqueOrThrow({ where: { id: user.id } });
+    expect(refunded.premiumTier).toBe("FREE");
+    expect(refunded.premiumUntil).toBeNull();
+    expect(refunded.inventorySlots).toBe(60);
+    expect((await getUserBalances(c.prisma, user.id)).gems).toBe(1_000n);
+  });
+
+  it("refuses to refund a character that already has match history", async () => {
+    const a = await admin();
+    const { user } = await makeUser(c);
+    await creditGems(c, user.id, 5_000n);
+    const { purchase } = await withTransaction(c.prisma, (tx) => purchaseProduct(tx, c.config, c.logger, { userId: user.id, sku: "char_mage_gems", quantity: 1, idempotencyKey: k() }));
+    const uc = await c.prisma.userCharacter.findFirstOrThrow({ where: { userId: user.id, character: { key: "mage" } } });
+    const match = await c.prisma.gameMatch.create({ data: { roomId: "r", mode: "CASUAL", mapKey: "m", maxPlayers: 2, tickRate: 60 } });
+    await c.prisma.gameMatchPlayer.create({ data: { matchId: match.id, userId: user.id, userCharacterId: uc.id } });
+    await expect(withTransaction(c.prisma, (tx) => refundPurchase(tx, c.logger, purchase.id, a.id, "test refund", null))).rejects.toMatchObject({ code: "CONFLICT" });
+    expect((await c.prisma.purchase.findUniqueOrThrow({ where: { id: purchase.id } })).status).toBe("COMPLETED");
   });
 });

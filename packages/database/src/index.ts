@@ -56,7 +56,9 @@ export async function withTransaction<T>(
     try {
       return await prisma.$transaction((tx) => fn(tx as Tx), { timeout: opts.timeoutMs ?? 15_000, maxWait: 10_000 });
     } catch (err) {
-      if (attempt >= retries || !isRetryableTxError(err)) throw err;
+      // A unique violation usually means a concurrent request won an idempotency race; retrying in a
+      // fresh transaction lets the caller find the winner's row and return it as a duplicate.
+      if (attempt >= retries || !(isRetryableTxError(err) || isUniqueViolation(err))) throw err;
       await new Promise((r) => setTimeout(r, 20 * 2 ** attempt + Math.random() * 20));
     }
   }

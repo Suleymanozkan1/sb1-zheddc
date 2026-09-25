@@ -69,11 +69,10 @@ export async function requestWithdrawal(ctx: EconomyContext, req: WithdrawalRequ
   if (!config.REWARD_TOKEN_MINT) throw new AppError("NOT_CONFIGURED", "Withdrawals are not configured (REWARD_TOKEN_MINT)");
 
   return withTransaction(ctx.prisma, async (tx) => {
+    // Serialise all withdrawal requests of this user so cooldown / daily-limit / idempotency checks are race-free.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`withdrawal:${req.userId}`}))`;
     const prior = await tx.withdrawal.findUnique({ where: { idempotencyKey: idem } });
     if (prior) return { withdrawal: prior, duplicate: true };
-
-    // Serialise all withdrawal requests of this user so cooldown / daily-limit checks are race-free.
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`withdrawal:${req.userId}`}))`;
 
     const user = await tx.user.findUniqueOrThrow({ where: { id: req.userId }, include: { wallets: true } });
     await requireFeature(tx, config, user, "WITHDRAWAL");
@@ -177,25 +176,46 @@ export async function approveWithdrawal(ctx: EconomyContext, withdrawalId: strin
     const w = await tx.withdrawal.findUnique({ where: { id: withdrawalId } });
     if (!w) throw new AppError("NOT_FOUND", "Withdrawal not found");
     if (w.status !== "PENDING" || !w.requiresReview) throw new AppError("CONFLICT", "Withdrawal is not awaiting review");
-    const updated = await tx.withdrawal.update({
-      where: { id: w.id },
+    // Conditional update: a concurrent cancel/claim cannot be overwritten.
+    const res = await tx.withdrawal.updateMany({
+      where: { id: w.id, status: "PENDING", requiresReview: true },
       data: { requiresReview: false, reviewedByAdminId: adminUserId, reviewedAt: new Date(), reviewNote: note },
     });
+    if (res.count !== 1) throw new AppError("CONFLICT", "Withdrawal is not awaiting review");
+    const updated = await tx.withdrawal.findUniqueOrThrow({ where: { id: w.id } });
     await writeAudit(tx, { actorType: "ADMIN", adminUserId, userId: w.userId, action: "WITHDRAWAL_APPROVE", targetType: "Withdrawal", targetId: w.id, before: { requiresReview: true }, after: { requiresReview: false }, reason: note, ip });
     return updated;
   });
 }
 
 // ───────────────────────── Worker side (blockchain-service) ─────────────────────────
+//
+// Every worker-side write is fenced by `lockToken`, which is rotated on each claim. A worker
+// whose claim was taken over (e.g. after a stale-lock recovery) can no longer record a signature,
+// reschedule, complete or fail the withdrawal: its writes match zero rows and it stops.
 
-/** Claims the next withdrawal that is due. Uses SKIP LOCKED so multiple workers never collide. */
-export async function claimNextWithdrawal(ctx: EconomyContext, staleLockMs = 120_000): Promise<Withdrawal | null> {
+export class LostOwnershipError extends Error {
+  constructor(id: string) {
+    super(`Worker lost ownership of withdrawal ${id}`);
+    this.name = "LostOwnershipError";
+  }
+}
+
+/** A withdrawal row claimed by a worker, together with the fencing token of that claim. */
+export type ClaimedWithdrawal = Withdrawal & { lockToken: string };
+
+/**
+ * Claims the next due withdrawal (or a specific one) and rotates its fencing token.
+ * Uses SKIP LOCKED so concurrent workers never pick the same row at the same time.
+ */
+export async function claimNextWithdrawal(ctx: EconomyContext, staleLockMs = 120_000, onlyId?: string): Promise<ClaimedWithdrawal | null> {
   const staleBefore = new Date(Date.now() - staleLockMs);
   const rows = await ctx.prisma.$queryRaw<{ id: string }[]>`
-    UPDATE "Withdrawal" SET status = 'PROCESSING', "lockedAt" = now(), "updatedAt" = now()
+    UPDATE "Withdrawal" SET status = 'PROCESSING', "lockedAt" = now(), "lockToken" = gen_random_uuid(), "updatedAt" = now()
     WHERE id = (
       SELECT id FROM "Withdrawal"
       WHERE "nextAttemptAt" <= now()
+        AND (${onlyId ?? null}::uuid IS NULL OR id = ${onlyId ?? null}::uuid)
         AND (
           (status = 'PENDING' AND "requiresReview" = false)
           OR (status = 'PROCESSING' AND ("lockedAt" IS NULL OR "lockedAt" < ${staleBefore}))
@@ -206,43 +226,65 @@ export async function claimNextWithdrawal(ctx: EconomyContext, staleLockMs = 120
     )
     RETURNING id`;
   const id = rows[0]?.id;
-  return id ? ctx.prisma.withdrawal.findUnique({ where: { id } }) : null;
+  if (!id) return null;
+  const w = await ctx.prisma.withdrawal.findUnique({ where: { id } });
+  return w && w.lockToken ? { ...w, lockToken: w.lockToken } : null;
 }
 
-/** Stores the signed transaction's signature BEFORE it is broadcast. */
-export async function recordWithdrawalSignature(ctx: EconomyContext, id: string, signature: string, lastValidBlockHeight: bigint): Promise<void> {
+/** Locks the row and verifies the caller still owns it. Returns the fresh row. */
+async function lockOwned(tx: Tx, id: string, lockToken: string): Promise<Withdrawal> {
+  await tx.$queryRaw`SELECT id FROM "Withdrawal" WHERE id = CAST(${id} AS uuid) FOR UPDATE`;
+  const current = await tx.withdrawal.findUniqueOrThrow({ where: { id } });
+  if (current.status !== "PROCESSING" || current.lockToken !== lockToken) throw new LostOwnershipError(id);
+  return current;
+}
+
+/**
+ * Stores the signed transaction's signature BEFORE it is broadcast. `previousSignature` is the
+ * signature the worker evaluated as dead (or null); any other stored value means someone else
+ * already moved on, so the write is refused.
+ */
+export async function recordWithdrawalSignature(
+  ctx: EconomyContext,
+  w: ClaimedWithdrawal,
+  previousSignature: string | null,
+  signature: string,
+  lastValidBlockHeight: bigint,
+): Promise<void> {
   await ctx.prisma.$transaction(async (tx) => {
-    const w = await tx.withdrawal.findUniqueOrThrow({ where: { id } });
-    if (w.signature && w.signature !== signature) {
+    const current = await lockOwned(tx, w.id, w.lockToken);
+    if (current.signature !== previousSignature) throw new LostOwnershipError(w.id);
+    if (current.signature) {
       // Keep history of abandoned (expired/failed) attempts.
       await tx.walletTransaction.upsert({
-        where: { signature: w.signature },
+        where: { signature: current.signature },
         update: { status: "FAILED" },
-        create: { userId: w.userId, signature: w.signature, kind: "WITHDRAWAL", network: w.network, mint: w.mint, amount: w.amount, status: "FAILED" },
+        create: { userId: current.userId, signature: current.signature, kind: "WITHDRAWAL", network: current.network, mint: current.mint, amount: current.amount, status: "FAILED" },
       });
     }
-    await tx.withdrawal.update({ where: { id }, data: { signature, lastValidBlockHeight, attempts: { increment: 1 } } });
+    await tx.withdrawal.update({ where: { id: w.id }, data: { signature, lastValidBlockHeight, attempts: { increment: 1 } } });
     await tx.walletTransaction.upsert({
       where: { signature },
       update: {},
-      create: { userId: w.userId, signature, kind: "WITHDRAWAL", network: w.network, mint: w.mint, amount: w.amount, status: "SUBMITTED" },
+      create: { userId: current.userId, signature, kind: "WITHDRAWAL", network: current.network, mint: current.mint, amount: current.amount, status: "SUBMITTED" },
     });
   });
 }
 
-/** Releases the worker lock and schedules the next check. */
-export async function rescheduleWithdrawal(ctx: EconomyContext, id: string, delayMs: number, lastError: string | null): Promise<void> {
-  await ctx.prisma.withdrawal.update({
-    where: { id },
-    data: { lockedAt: null, nextAttemptAt: new Date(Date.now() + delayMs), ...(lastError !== null ? { lastError } : {}) },
+/** Releases the worker lock (only if still owned) and schedules the next check. */
+export async function rescheduleWithdrawal(ctx: EconomyContext, w: ClaimedWithdrawal, delayMs: number, lastError: string | null): Promise<void> {
+  const res = await ctx.prisma.withdrawal.updateMany({
+    where: { id: w.id, status: "PROCESSING", lockToken: w.lockToken },
+    data: { lockedAt: null, lockToken: null, nextAttemptAt: new Date(Date.now() + delayMs), ...(lastError !== null ? { lastError } : {}) },
   });
+  if (res.count !== 1) throw new LostOwnershipError(w.id);
 }
 
-export async function completeWithdrawal(ctx: EconomyContext, id: string, signature: string, slot: bigint | null): Promise<Withdrawal> {
-  const w = await withTransaction(ctx.prisma, async (tx) => {
-    const [row] = await tx.$queryRaw<{ status: string }[]>`SELECT status FROM "Withdrawal" WHERE id = CAST(${id} AS uuid) FOR UPDATE`;
-    const current = await tx.withdrawal.findUniqueOrThrow({ where: { id } });
-    if (row?.status === "COMPLETED") return current;
+/** Settles a withdrawal whose recorded transaction is finalized. Only the owning worker may do this. */
+export async function completeWithdrawal(ctx: EconomyContext, w: ClaimedWithdrawal, signature: string, slot: bigint | null): Promise<Withdrawal> {
+  const id = w.id;
+  const done = await withTransaction(ctx.prisma, async (tx) => {
+    const current = await lockOwned(tx, id, w.lockToken);
     if (current.signature !== signature) throw new AppError("CONFLICT", "Signature does not match the recorded withdrawal transaction");
     const settle = await postJournal(tx, {
       type: "WITHDRAWAL",
@@ -265,23 +307,22 @@ export async function completeWithdrawal(ctx: EconomyContext, id: string, signat
     });
     return tx.withdrawal.update({
       where: { id },
-      data: { status: "COMPLETED", completedAt: new Date(), settleJournalId: settle.journalId, lockedAt: null, lastError: null },
+      data: { status: "COMPLETED", completedAt: new Date(), settleJournalId: settle.journalId, lockedAt: null, lockToken: null, lastError: null },
     });
   });
-  ctx.logger.info({ event: LogEvent.WITHDRAWAL_COMPLETED, withdrawalId: id, userId: w.userId, signature, amount: w.amount.toString() }, "withdrawal completed");
-  return w;
+  ctx.logger.info({ event: LogEvent.WITHDRAWAL_COMPLETED, withdrawalId: id, userId: done.userId, signature, amount: done.amount.toString() }, "withdrawal completed");
+  return done;
 }
 
-/** Terminal failure: only call when no recorded signature can still land. Refunds the hold. */
-export async function failWithdrawal(ctx: EconomyContext, id: string, reason: string): Promise<Withdrawal> {
-  const w = await withTransaction(ctx.prisma, async (tx) => {
-    const current = await tx.withdrawal.findUniqueOrThrow({ where: { id } });
-    if (current.status === "FAILED" || current.status === "COMPLETED" || current.status === "CANCELLED") return current;
+/** Terminal failure: only when no recorded signature can still land, and only by the owning worker. Refunds the hold. */
+export async function failWithdrawal(ctx: EconomyContext, w: ClaimedWithdrawal, reason: string): Promise<Withdrawal> {
+  const done = await withTransaction(ctx.prisma, async (tx) => {
+    const current = await lockOwned(tx, w.id, w.lockToken);
     const refund = await refundHold(tx, current, "REFUND", reason, null);
-    return tx.withdrawal.update({ where: { id }, data: { status: "FAILED", lastError: reason, settleJournalId: refund, lockedAt: null } });
+    return tx.withdrawal.update({ where: { id: w.id }, data: { status: "FAILED", lastError: reason, settleJournalId: refund, lockedAt: null, lockToken: null } });
   });
-  ctx.logger.error({ event: LogEvent.WITHDRAWAL_FAILED, withdrawalId: id, reason }, "withdrawal failed and refunded");
-  return w;
+  ctx.logger.error({ event: LogEvent.WITHDRAWAL_FAILED, withdrawalId: w.id, reason }, "withdrawal failed and refunded");
+  return done;
 }
 
 export async function updateWithdrawalQueueMetrics(ctx: EconomyContext): Promise<void> {

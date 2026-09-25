@@ -183,7 +183,24 @@ export async function refundPurchase(tx: Tx, logger: Logger, purchaseId: string,
           legs: transfer({ userId: purchase.userId, kind: g.kind }, { system: g.kind === "GEMS" ? "GEMS_ISSUANCE" : "GOLD_ISSUANCE" }, BigInt(g.amount)),
         });
       } else if (g.kind === "CHARACTER") {
-        await tx.userCharacter.deleteMany({ where: { userId: purchase.userId, character: { key: g.characterKey } } });
+        const uc = await tx.userCharacter.findFirst({ where: { userId: purchase.userId, character: { key: g.characterKey } } });
+        if (uc) {
+          // Match history references the character; deleting it would break that history.
+          const played = await tx.gameMatchPlayer.count({ where: { userCharacterId: uc.id } });
+          if (played > 0) throw new AppError("CONFLICT", "This character was already used in matches and cannot be refunded; use a balance adjustment instead");
+          await tx.userCharacter.delete({ where: { id: uc.id } });
+        }
+      } else if (g.kind === "INVENTORY_SLOTS") {
+        await tx.user.update({ where: { id: purchase.userId }, data: { inventorySlots: { decrement: g.amount } } });
+      } else if (g.kind === "PREMIUM") {
+        const u = await tx.user.findUniqueOrThrow({ where: { id: purchase.userId } });
+        if (u.premiumUntil) {
+          const until = new Date(u.premiumUntil.getTime() - g.days * 86_400_000);
+          await tx.user.update({
+            where: { id: purchase.userId },
+            data: until > new Date() ? { premiumUntil: until } : { premiumTier: "FREE", premiumUntil: null },
+          });
+        }
       }
     }
   }

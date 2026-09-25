@@ -784,6 +784,8 @@ model Withdrawal {
   attempts             Int              @default(0)
   nextAttemptAt        DateTime         @default(now())
   lockedAt             DateTime?
+  /// Fencing token of the worker that currently owns the row (rotated on every claim).
+  lockToken            String?          @db.Uuid
   lastError            String?
   idempotencyKey       String           @unique
   holdJournalId        String           @db.Uuid

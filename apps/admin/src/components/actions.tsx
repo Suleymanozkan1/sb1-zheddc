@@ -185,7 +185,7 @@ function AdjustBalanceBody({ target, ...p }: Closeable & { target: { id: string;
       title="Adjust balance"
       confirmLabel="Post adjustment"
       variant="danger"
-      min="ADMIN"
+      min={account === "CRYPTO_REWARD" ? "SUPER_ADMIN" : "ADMIN"}
       validate={() => (!valid ? "Delta must be a non-zero signed integer in base units" : null)}
       description={target && <p>Posts an ADMIN_ADJUSTMENT journal for <b className="text-white">{target.username}</b>. Ledger rows are never edited.</p>}
       onConfirm={(reason) => api.adjustBalance(target.id, account, delta.trim(), reason)}

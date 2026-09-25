@@ -62,10 +62,12 @@ async function generateExtractableKeypairBytes(): Promise<Uint8Array> {
   return out;
 }
 
-async function loadTreasury(): Promise<KeyPairSigner> {
-  if (process.env.TREASURY_SECRET) {
-    const raw = process.env.TREASURY_SECRET.trim();
-    if (raw.startsWith("[")) return createKeyPairSignerFromBytes(Uint8Array.from(JSON.parse(raw) as number[]));
+/** Loads (or creates) the treasury keypair and returns it with the JSON secret it came from. */
+async function loadTreasury(): Promise<{ signer: KeyPairSigner; secretJson: string }> {
+  const fromEnv = process.env.TREASURY_SECRET?.trim();
+  if (fromEnv) {
+    if (!fromEnv.startsWith("[")) throw new Error("TREASURY_SECRET must be a JSON byte array (solana-keygen format) for this script");
+    return { signer: await createKeyPairSignerFromBytes(Uint8Array.from(JSON.parse(fromEnv) as number[])), secretJson: fromEnv };
   }
   if (!existsSync(SECRET_FILE)) {
     mkdirSync("secrets", { recursive: true });
@@ -73,7 +75,8 @@ async function loadTreasury(): Promise<KeyPairSigner> {
     writeFileSync(SECRET_FILE, JSON.stringify([...bytes]), { mode: 0o600 });
     console.log(`Generated new treasury keypair → ${SECRET_FILE} (keep it secret, never commit it)`);
   }
-  return createKeyPairSignerFromBytes(Uint8Array.from(JSON.parse(readFileSync(SECRET_FILE, "utf8")) as number[]));
+  const secretJson = readFileSync(SECRET_FILE, "utf8").trim();
+  return { signer: await createKeyPairSignerFromBytes(Uint8Array.from(JSON.parse(secretJson) as number[])), secretJson };
 }
 
 async function confirm(sig: string, label: string): Promise<void> {
@@ -168,7 +171,7 @@ async function main(): Promise<void> {
   const genesis = await rpc.getGenesisHash().send();
   if (NETWORK === "devnet" && genesis !== "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG") throw new Error(`RPC ${RPC_URL} is not devnet`);
 
-  const treasury = await loadTreasury();
+  const { signer: treasury, secretJson } = await loadTreasury();
   console.log(`Treasury: ${treasury.address}`);
   await ensureSol(treasury, 0.5);
 
@@ -199,7 +202,7 @@ async function main(): Promise<void> {
     REWARD_TOKEN_DECIMALS: String(DECIMALS),
   };
   if (args.includes("--write-env")) {
-    writeEnv({ ...values, TREASURY_SECRET: readFileSync(SECRET_FILE, "utf8").trim() });
+    writeEnv({ ...values, TREASURY_SECRET: secretJson });
   } else {
     console.log("\nAdd to .env (TREASURY_SECRET = contents of secrets/treasury.json; blockchain-service only):");
     for (const [k, v] of Object.entries(values)) console.log(`${k}=${v}`);

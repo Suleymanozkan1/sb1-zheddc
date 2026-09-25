@@ -2,6 +2,7 @@
 import { withTransaction } from "@cryptoarena/database";
 import {
   AppError,
+  ROLE_RANK,
   adjustBalance,
   adminFundRewardPool,
   adminGrantItem,
@@ -217,6 +218,7 @@ export async function registerAdminRoutes(app: FastifyInstance, ctx: ApiContext)
     return withTransaction(db, async (tx) => {
       const before = await tx.adminUser.findUnique({ where: { userId: b.userId } });
       if (b.userId === (await tx.adminUser.findUniqueOrThrow({ where: { id: actor.adminUserId } })).userId) throw new AppError("FORBIDDEN", "You cannot change your own role");
+      if (before?.active && ROLE_RANK[before.role] >= ROLE_RANK[actor.role]) throw new AppError("FORBIDDEN", "Cannot change the role of an equal or higher admin");
       const after = b.role
         ? await tx.adminUser.upsert({ where: { userId: b.userId }, update: { role: b.role, active: true }, create: { userId: b.userId, role: b.role, createdById: actor.adminUserId } })
         : before

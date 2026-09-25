@@ -1,5 +1,5 @@
 import { MockSolanaGateway } from "@cryptoarena/blockchain";
-import { cancelWithdrawal, getUserBalances, requestWithdrawal } from "@cryptoarena/economy";
+import { LostOwnershipError, cancelWithdrawal, claimNextWithdrawal, getUserBalances, requestWithdrawal } from "@cryptoarena/economy";
 import { describe, expect, it } from "vitest";
 import { WithdrawalWorker } from "../../apps/blockchain-service/src/worker";
 import { creditReward, ctx, makeUser, randomAddress } from "./helpers";
@@ -8,6 +8,14 @@ const key = () => `k${Math.random().toString(36).slice(2)}${Date.now()}`;
 
 describe("withdrawals", () => {
   const c = ctx({ WITHDRAWAL_COOLDOWN_SECONDS: "0", WITHDRAWAL_MIN_ACCOUNT_AGE_HOURS: "0", WITHDRAWAL_MAX_ATTEMPTS: "3" });
+
+  /** Claims one specific withdrawal the way the worker loop does (making it due first). */
+  async function claim(id: string) {
+    await c.prisma.withdrawal.update({ where: { id }, data: { nextAttemptAt: new Date(Date.now() - 1000) } });
+    const w = await claimNextWithdrawal(c, 120_000, id);
+    if (!w) throw new Error("claim failed");
+    return w;
+  }
 
   async function funded(amount = 50_000_000n) {
     const u = await makeUser(c);
@@ -67,21 +75,40 @@ describe("withdrawals", () => {
     const { withdrawal } = await requestWithdrawal(c, { userId: user.id, amount: 10_000_000n, walletAddress: wallet!.address, idempotencyKey: key() });
     const gw = new MockSolanaGateway("devnet");
     const worker = new WithdrawalWorker({ ctx: c, gateway: gw, signer: null });
-    // Only process this test's withdrawal.
-    await c.prisma.withdrawal.updateMany({ where: { id: { not: withdrawal.id }, status: { in: ["PENDING", "PROCESSING"] } }, data: { nextAttemptAt: new Date(Date.now() + 3_600_000) } });
 
-    const w1 = await c.prisma.withdrawal.findUniqueOrThrow({ where: { id: withdrawal.id } });
-    expect(await worker.process(w1)).toBe("sent");
+    expect(await worker.process(await claim(withdrawal.id))).toBe("sent");
     const w2 = await c.prisma.withdrawal.findUniqueOrThrow({ where: { id: withdrawal.id } });
-    expect(w2.status).toBe("PENDING"); // not claimed in this direct call; still not COMPLETED
+    expect(w2.status).toBe("PROCESSING");
     expect(w2.signature).toBeTruthy();
-    expect(await worker.process(w2)).toBe("completed");
+    expect(await worker.process(await claim(withdrawal.id))).toBe("completed");
     const w3 = await c.prisma.withdrawal.findUniqueOrThrow({ where: { id: withdrawal.id } });
     expect(w3.status).toBe("COMPLETED");
     expect(gw.sent).toHaveLength(1);
-    // Re-processing a completed withdrawal never sends again.
-    expect(await worker.process(w3)).toBe("completed");
+    // A completed withdrawal can never be claimed (and therefore never paid) again.
+    await c.prisma.withdrawal.update({ where: { id: withdrawal.id }, data: { nextAttemptAt: new Date(0) } });
+    expect(await claimNextWithdrawal(c, 120_000, withdrawal.id)).toBeNull();
     expect(gw.sent).toHaveLength(1);
+  });
+
+  it("fences out a worker whose claim was taken over (no second treasury transaction)", async () => {
+    const { user, wallet } = await funded();
+    const { withdrawal } = await requestWithdrawal(c, { userId: user.id, amount: 10_000_000n, walletAddress: wallet!.address, idempotencyKey: key() });
+    const gw = new MockSolanaGateway("devnet");
+    const slowWorker = new WithdrawalWorker({ ctx: c, gateway: gw, signer: null });
+    const newWorker = new WithdrawalWorker({ ctx: c, gateway: gw, signer: null });
+
+    const stale = await claim(withdrawal.id);
+    // The first worker stalls; its lock goes stale and another worker reclaims the row.
+    await c.prisma.withdrawal.update({ where: { id: withdrawal.id }, data: { lockedAt: new Date(Date.now() - 10 * 60_000) } });
+    const fresh = await claimNextWithdrawal(c, 120_000, withdrawal.id);
+    expect(fresh?.lockToken).not.toBe(stale.lockToken);
+    expect(await newWorker.process(fresh!)).toBe("sent");
+
+    // The stale worker wakes up: every write is refused and nothing is broadcast.
+    await expect(slowWorker.process(stale)).rejects.toBeInstanceOf(LostOwnershipError);
+    expect(gw.sent).toHaveLength(1);
+    const row = await c.prisma.withdrawal.findUniqueOrThrow({ where: { id: withdrawal.id } });
+    expect(row.signature).toBe(gw.sent[0]);
   });
 
   it("keeps the signature when broadcasting fails and never double-sends", async () => {
@@ -90,16 +117,15 @@ describe("withdrawals", () => {
     const gw = new MockSolanaGateway("devnet");
     gw.failNextSend = new Error("RPC timeout");
     const worker = new WithdrawalWorker({ ctx: c, gateway: gw, signer: null });
-    const w = await c.prisma.withdrawal.findUniqueOrThrow({ where: { id: withdrawal.id } });
-    expect(await worker.process(w)).toBe("waiting");
+    expect(await worker.process(await claim(withdrawal.id))).toBe("waiting");
     const after = await c.prisma.withdrawal.findUniqueOrThrow({ where: { id: withdrawal.id } });
     expect(after.signature).toBeTruthy();
     expect(after.status).not.toBe("COMPLETED");
     // Blockhash still valid → the SAME signed transaction is re-broadcast, not a new one.
-    expect(await worker.process(after)).toBe("waiting");
+    expect(await worker.process(await claim(withdrawal.id))).toBe("waiting");
     const again = await c.prisma.withdrawal.findUniqueOrThrow({ where: { id: withdrawal.id } });
     expect(again.signature).toBe(after.signature);
-    expect(await worker.process(again)).toBe("completed");
+    expect(await worker.process(await claim(withdrawal.id))).toBe("completed");
     expect(new Set(gw.sent).size).toBe(1);
   });
 
@@ -114,7 +140,7 @@ describe("withdrawals", () => {
       const w = await c.prisma.withdrawal.findUniqueOrThrow({ where: { id: withdrawal.id } });
       if (w.status === "FAILED") break;
       gw.blockHeight += 1000n; // every previous blockhash expires
-      await worker.process(w);
+      await worker.process(await claim(withdrawal.id));
     }
     const final = await c.prisma.withdrawal.findUniqueOrThrow({ where: { id: withdrawal.id } });
     expect(final.status).toBe("FAILED");

@@ -55,11 +55,18 @@ export function zonesAt(map: ArenaMap, x: number, y: number): Zone[] {
   return map.zones.filter((z) => (x - z.x) ** 2 + (y - z.y) ** 2 <= z.r * z.r);
 }
 
-const cache = new Map<number, ArenaMap>();
+/** Small LRU of generated maps keyed by (seed, size); ranked rooms use random seeds. */
+const cache = new Map<string, ArenaMap>();
+const MAX_CACHED_MAPS = 8;
 
 export function generateArena(seed: number, size = WORLD_SIZE): ArenaMap {
-  const cached = cache.get(seed);
-  if (cached && cached.size === size) return cached;
+  const cacheKey = `${seed}:${size}`;
+  const cached = cache.get(cacheKey);
+  if (cached) {
+    cache.delete(cacheKey);
+    cache.set(cacheKey, cached);
+    return cached;
+  }
 
   const rng = new Rng(seed);
   const c = size / 2;
@@ -147,7 +154,8 @@ export function generateArena(seed: number, size = WORLD_SIZE): ArenaMap {
   }
 
   const map: ArenaMap = { seed, size, obstacles, grid, zones, playerSpawns, merchants };
-  cache.set(seed, map);
+  cache.set(cacheKey, map);
+  while (cache.size > MAX_CACHED_MAPS) cache.delete(cache.keys().next().value!);
   return map;
 }
 

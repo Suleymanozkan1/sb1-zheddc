@@ -103,9 +103,14 @@ export async function registerAuthRoutes(app: FastifyInstance, ctx: ApiContext):
     const token = req.cookies[COOKIE_REFRESH];
     if (!token) throw new AppError("UNAUTHORIZED", "No refresh token");
     const outcome = await withTransaction(ctx.prisma, async (tx) => {
-      const session = await tx.session.findUnique({ where: { refreshTokenHash: sha256(token) }, include: { user: true } });
+      const hash = sha256(token);
+      // Lock the row so two concurrent refreshes with the same token cannot both rotate it.
+      await tx.$queryRaw`SELECT id FROM "Session" WHERE "refreshTokenHash" = ${hash} FOR UPDATE`;
+      const session = await tx.session.findUnique({ where: { refreshTokenHash: hash }, include: { user: true } });
       if (!session) return { ok: false as const };
       if (session.revokedAt) {
+        // Benign race: another tab rotated this token moments ago — reject without revoking the family.
+        if (session.replacedById && Date.now() - session.revokedAt.getTime() < 30_000) return { ok: false as const };
         // Reuse of a rotated token → assume theft, revoke the whole family.
         await tx.session.updateMany({ where: { familyId: session.familyId, revokedAt: null }, data: { revokedAt: new Date() } });
         return { ok: false as const, reuse: true };

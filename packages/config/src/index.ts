@@ -130,7 +130,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): AppConfig {
 
   if (isProduction) {
     if (c.SOLANA_MOCK) throw new ConfigError("SOLANA_MOCK cannot be enabled in production");
-    if (c.ALLOW_GUESTS && c.DEV_BOTS > 0) throw new ConfigError("DEV_BOTS must be 0 in production");
+    if (c.DEV_BOTS > 0) throw new ConfigError("DEV_BOTS must be 0 in production");
     if (/change[-_]?me|dev[-_]?secret/i.test(c.JWT_SECRET)) throw new ConfigError("JWT_SECRET looks like a development placeholder");
   }
   if (c.SOLANA_NETWORK === "mainnet-beta" && !(isProduction && c.ALLOW_MAINNET)) {

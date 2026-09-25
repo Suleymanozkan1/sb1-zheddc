@@ -14,8 +14,10 @@ export class RateWindow {
   /** Records a hit; returns false when the limit is exceeded. */
   hit(now: number): boolean {
     while (this.stamps.length > 0 && now - this.stamps[0]! > this.windowMs) this.stamps.shift();
+    // Rejected hits are not stored, so a flood cannot grow the window unboundedly.
+    if (this.stamps.length >= this.max) return false;
     this.stamps.push(now);
-    return this.stamps.length <= this.max;
+    return true;
   }
 }
 

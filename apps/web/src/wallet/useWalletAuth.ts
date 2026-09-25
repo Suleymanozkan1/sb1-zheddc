@@ -43,7 +43,12 @@ export function useWalletAuth() {
 
   // Continue the flow once the user picked a wallet in the modal.
   useEffect(() => {
-    if (wallet.connected && pending.current) void sign(pending.current);
+    if (wallet.connected && pending.current) {
+      // Clear before the async flow so wallet state changes during signing cannot start it twice.
+      const purpose = pending.current;
+      pending.current = null;
+      void sign(purpose);
+    }
   }, [wallet.connected, sign]);
 
   const start = useCallback(

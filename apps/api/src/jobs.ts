@@ -2,6 +2,7 @@
 // instance executes them): deposit settlement/expiry and leaderboard reward distribution.
 
 import { withTransaction } from "@cryptoarena/database";
+import pg from "pg";
 import { dayKey, distributeLeaderboardRewards, processPendingDeposits, weekKey } from "@cryptoarena/economy";
 import type { ApiContext } from "./context";
 
@@ -11,9 +12,33 @@ const LOCK_KEY = 872_341_001;
 const DAILY_LEADERBOARD_REWARD_TOKENS = 20n;
 const WEEKLY_LEADERBOARD_REWARD_TOKENS = 100n;
 
+// Session-level advisory locks belong to one connection, so the leader lock uses a dedicated
+// client instead of the Prisma pool (where lock and unlock could run on different connections).
+let lockClient: pg.Client | null = null;
+
+async function leaderClient(ctx: ApiContext): Promise<pg.Client> {
+  if (!lockClient) {
+    const client = new pg.Client({ connectionString: ctx.config.DATABASE_URL });
+    client.on("error", (err) => {
+      ctx.logger.warn({ err: err.message }, "job lock connection lost");
+      lockClient = null;
+    });
+    await client.connect();
+    lockClient = client;
+  }
+  return lockClient;
+}
+
+export async function closeJobLock(): Promise<void> {
+  const c = lockClient;
+  lockClient = null;
+  await c?.end().catch(() => undefined);
+}
+
 export async function runJobsOnce(ctx: ApiContext): Promise<void> {
-  const [lock] = await ctx.prisma.$queryRaw<{ locked: boolean }[]>`SELECT pg_try_advisory_lock(${LOCK_KEY}) AS locked`;
-  if (!lock?.locked) return;
+  const client = await leaderClient(ctx);
+  const { rows } = await client.query<{ locked: boolean }>("SELECT pg_try_advisory_lock($1) AS locked", [LOCK_KEY]);
+  if (!rows[0]?.locked) return;
   try {
     if (ctx.config.REWARD_TOKEN_MINT || ctx.config.SOLANA_MOCK) {
       const r = await processPendingDeposits(ctx, ctx.gateway);
@@ -35,7 +60,7 @@ export async function runJobsOnce(ctx: ApiContext): Promise<void> {
   } catch (err) {
     ctx.logger.error({ err }, "background job failed");
   } finally {
-    await ctx.prisma.$queryRaw`SELECT pg_advisory_unlock(${LOCK_KEY})`;
+    await client.query("SELECT pg_advisory_unlock($1)", [LOCK_KEY]).catch(() => undefined);
   }
 }
 
@@ -44,10 +69,15 @@ export function startJobs(ctx: ApiContext, intervalMs = 30_000): () => void {
   const timer = setInterval(() => {
     if (running) return;
     running = true;
-    void runJobsOnce(ctx).finally(() => {
+    void runJobsOnce(ctx)
+      .catch((err: unknown) => ctx.logger.error({ err }, "job runner failed"))
+      .finally(() => {
       running = false;
     });
   }, intervalMs);
   timer.unref();
-  return () => clearInterval(timer);
+  return () => {
+    clearInterval(timer);
+    void closeJobLock();
+  };
 }

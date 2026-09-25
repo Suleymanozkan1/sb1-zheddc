@@ -1,7 +1,9 @@
 // Withdrawal worker. The ONLY component holding the treasury signer.
 //
 // Double-payment protection:
-//   1. a withdrawal row is claimed with FOR UPDATE SKIP LOCKED (one worker at a time);
+//   1. a withdrawal row is claimed with FOR UPDATE SKIP LOCKED and gets a fresh fencing token;
+//      every later write by this worker is conditional on that token, so a worker whose claim
+//      was taken over can no longer record, broadcast, complete or fail the withdrawal;
 //   2. the signed transaction's signature is persisted BEFORE broadcasting;
 //   3. a recorded signature is only abandoned once it has definitely failed on-chain or its
 //      blockhash expired without the signature ever being seen — only then is a new
@@ -11,14 +13,15 @@ import { randomBytes } from "node:crypto";
 import { buildSignedWithdrawalTransaction, encodeMockTransfer, type SolanaGateway, type TreasurySigner } from "@cryptoarena/blockchain";
 import {
   claimNextWithdrawal,
+  LostOwnershipError,
   completeWithdrawal,
   failWithdrawal,
   recordWithdrawalSignature,
   rescheduleWithdrawal,
   updateWithdrawalQueueMetrics,
+  type ClaimedWithdrawal,
   type EconomyContext,
 } from "@cryptoarena/economy";
-import type { Withdrawal } from "@cryptoarena/database";
 import { LogEvent } from "@cryptoarena/observability";
 import { getBase58Decoder } from "@solana/kit";
 
@@ -52,7 +55,8 @@ export class WithdrawalWorker {
     return this.deps.signer?.address ?? this.deps.mockTreasuryAddress ?? "mock-treasury";
   }
 
-  async process(w: Withdrawal): Promise<ProcessOutcome> {
+  /** Processes a withdrawal claimed with `claimNextWithdrawal` (carries the fencing token). */
+  async process(w: ClaimedWithdrawal): Promise<ProcessOutcome> {
     const { ctx, gateway } = this.deps;
     const log = ctx.logger.child({ withdrawalId: w.id, userId: w.userId });
 
@@ -61,11 +65,11 @@ export class WithdrawalWorker {
       const status = await gateway.getSignatureStatus(w.signature);
       if (status && (status.err === null || status.err === undefined)) {
         if (status.confirmationStatus === "finalized") {
-          await completeWithdrawal(ctx, w.id, w.signature, status.slot);
+          await completeWithdrawal(ctx, w, w.signature, status.slot);
           this.wire.delete(w.signature);
           return "completed";
         }
-        await rescheduleWithdrawal(ctx, w.id, CONFIRM_POLL_MS, null);
+        await rescheduleWithdrawal(ctx, w, CONFIRM_POLL_MS, null);
         return "waiting";
       }
       if (!status) {
@@ -74,7 +78,7 @@ export class WithdrawalWorker {
           // Still valid and not yet seen: re-broadcast the SAME signed transaction (idempotent on-chain).
           const wire = this.wire.get(w.signature);
           if (wire) await gateway.sendTransaction(wire).catch((err: unknown) => log.warn({ err: (err as Error).message }, "re-broadcast failed"));
-          await rescheduleWithdrawal(ctx, w.id, CONFIRM_POLL_MS, null);
+          await rescheduleWithdrawal(ctx, w, CONFIRM_POLL_MS, null);
           return "waiting";
         }
         log.warn({ signature: w.signature }, "previous withdrawal transaction expired without landing; rebuilding");
@@ -86,7 +90,7 @@ export class WithdrawalWorker {
 
     // 2. Out of attempts → refund (safe: no recorded transaction can still land at this point).
     if (w.attempts >= ctx.config.WITHDRAWAL_MAX_ATTEMPTS) {
-      await failWithdrawal(ctx, w.id, w.lastError ?? "max attempts reached");
+      await failWithdrawal(ctx, w, w.lastError ?? "max attempts reached");
       return "failed";
     }
 
@@ -94,7 +98,7 @@ export class WithdrawalWorker {
     const balance = await gateway.getTokenBalance(this.treasuryAddress, w.mint);
     if (!ctx.config.SOLANA_MOCK && balance < w.amount) {
       log.error({ balance: balance.toString(), amount: w.amount.toString() }, "treasury balance too low for withdrawal");
-      await rescheduleWithdrawal(ctx, w.id, 5 * 60_000, "treasury temporarily unable to pay; will retry");
+      await rescheduleWithdrawal(ctx, w, 5 * 60_000, "treasury temporarily unable to pay; will retry");
       return "deferred";
     }
 
@@ -118,19 +122,19 @@ export class WithdrawalWorker {
       signature = `mock${getBase58Decoder().decode(randomBytes(32))}`;
       wireTx = encodeMockTransfer(signature, this.treasuryAddress, w.walletAddress, w.mint, w.amount);
     }
-    await recordWithdrawalSignature(ctx, w.id, signature, lastValidBlockHeight);
+    await recordWithdrawalSignature(ctx, w, w.signature, signature, lastValidBlockHeight);
     this.wire.set(signature, wireTx);
 
     try {
       await gateway.sendTransaction(wireTx);
       log.info({ event: LogEvent.WITHDRAWAL_SENT, signature, amount: w.amount.toString() }, "withdrawal sent");
-      await rescheduleWithdrawal(ctx, w.id, CONFIRM_POLL_MS, null);
+      await rescheduleWithdrawal(ctx, w, CONFIRM_POLL_MS, null);
       return "sent";
     } catch (err) {
       // The transaction may or may not have reached the cluster: keep the signature and let step 1 decide.
       const message = (err as Error).message.slice(0, 500);
       log.warn({ err: message, signature }, "broadcast failed; will re-check signature status");
-      await rescheduleWithdrawal(ctx, w.id, backoffMs(w.attempts + 1), message);
+      await rescheduleWithdrawal(ctx, w, backoffMs(w.attempts + 1), message);
       return "waiting";
     }
   }
@@ -145,8 +149,12 @@ export class WithdrawalWorker {
       try {
         await this.process(w);
       } catch (err) {
+        if (err instanceof LostOwnershipError) {
+          this.deps.ctx.logger.warn({ withdrawalId: w.id }, "withdrawal was claimed by another worker; stopping");
+          continue;
+        }
         this.deps.ctx.logger.error({ err, withdrawalId: w.id }, "withdrawal processing error");
-        await rescheduleWithdrawal(this.deps.ctx, w.id, backoffMs(w.attempts + 1), (err as Error).message.slice(0, 500)).catch(() => undefined);
+        await rescheduleWithdrawal(this.deps.ctx, w, backoffMs(w.attempts + 1), (err as Error).message.slice(0, 500)).catch(() => undefined);
       }
     }
     await updateWithdrawalQueueMetrics(this.deps.ctx).catch(() => undefined);

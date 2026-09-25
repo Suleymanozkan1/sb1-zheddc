@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { MockSolanaGateway } from "@cryptoarena/blockchain";
 import type { FastifyInstance } from "fastify";
 import { generateKeyPairSigner, getBase58Decoder, getUtf8Encoder, signBytes } from "@solana/kit";
@@ -92,11 +93,29 @@ describe("REST API", () => {
     expect(foreign.statusCode).toBe(404);
   });
 
+  it("does not revoke the session family when two tabs refresh at the same time", async () => {
+    const login = await app.inject({ method: "POST", url: "/api/auth/guest", payload: {} });
+    const rt = login.cookies.find((x) => x.name === "ca_rt")!.value;
+    const [a, b] = await Promise.all([
+      app.inject({ method: "POST", url: "/api/auth/refresh", headers: { cookie: `ca_rt=${rt}` }, payload: {} }),
+      app.inject({ method: "POST", url: "/api/auth/refresh", headers: { cookie: `ca_rt=${rt}` }, payload: {} }),
+    ]);
+    const statuses = [a.statusCode, b.statusCode].sort();
+    expect(statuses).toEqual([200, 401]);
+    const winner = a.statusCode === 200 ? a : b;
+    const rotated = winner.cookies.find((x) => x.name === "ca_rt")!.value;
+    // The winner's new token keeps working: the losing tab did not trigger theft protection.
+    expect((await app.inject({ method: "POST", url: "/api/auth/refresh", headers: { cookie: `ca_rt=${rotated}` }, payload: {} })).statusCode).toBe(200);
+  });
+
   it("rotates refresh tokens and revokes the family on reuse", async () => {
     const login = await app.inject({ method: "POST", url: "/api/auth/guest", payload: {} });
     const rt = login.cookies.find((x) => x.name === "ca_rt")!.value;
     const first = await app.inject({ method: "POST", url: "/api/auth/refresh", headers: { cookie: `ca_rt=${rt}` }, payload: {} });
     expect(first.statusCode).toBe(200);
+    // Replay the old token after the benign-race grace window (e.g. a stolen cookie used later).
+    const hash = createHash("sha256").update(rt).digest("hex");
+    await c.prisma.session.update({ where: { refreshTokenHash: hash }, data: { revokedAt: new Date(Date.now() - 60_000) } });
     const reuse = await app.inject({ method: "POST", url: "/api/auth/refresh", headers: { cookie: `ca_rt=${rt}` }, payload: {} });
     expect(reuse.statusCode).toBe(401);
     const rotated = first.cookies.find((x) => x.name === "ca_rt")!.value;
