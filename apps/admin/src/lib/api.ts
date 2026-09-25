@@ -65,7 +65,8 @@ async function refreshSession(): Promise<boolean> {
     headers: { "content-type": "application/json" },
     body: "{}",
   })
-    .then((r) => r.ok)
+    // 409: another tab refreshed first; the shared cookies are already rotated, so retry.
+    .then((r) => r.ok || r.status === 409)
     .catch(() => false)
     .finally(() => {
       refreshing = null;

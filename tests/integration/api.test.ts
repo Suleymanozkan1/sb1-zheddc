@@ -119,8 +119,11 @@ describe("REST API", () => {
       app.inject({ method: "POST", url: "/api/auth/refresh", headers: { cookie: `ca_rt=${rt}` }, payload: {} }),
     ]);
     const statuses = [a.statusCode, b.statusCode].sort();
-    expect(statuses).toEqual([200, 401]);
+    expect(statuses).toEqual([200, 409]);
     const winner = a.statusCode === 200 ? a : b;
+    const loser = winner === a ? b : a;
+    // The losing response must not clear the cookies the winner just set.
+    expect(loser.cookies).toHaveLength(0);
     const rotated = winner.cookies.find((x) => x.name === "ca_rt")!.value;
     // The winner's new token keeps working: the losing tab did not trigger theft protection.
     expect((await app.inject({ method: "POST", url: "/api/auth/refresh", headers: { cookie: `ca_rt=${rotated}` }, payload: {} })).statusCode).toBe(200);

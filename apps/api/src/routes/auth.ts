@@ -113,7 +113,7 @@ export async function registerAuthRoutes(app: FastifyInstance, ctx: ApiContext):
       if (!session) return { ok: false as const };
       if (session.revokedAt) {
         // Benign race: another tab rotated this token moments ago — reject without revoking the family.
-        if (session.replacedById && Date.now() - session.revokedAt.getTime() < 30_000) return { ok: false as const };
+        if (session.replacedById && Date.now() - session.revokedAt.getTime() < 30_000) return { ok: false as const, benignRace: true };
         // Reuse of a rotated token → assume theft, revoke the whole family.
         await tx.session.updateMany({ where: { familyId: session.familyId, revokedAt: null }, data: { revokedAt: new Date() } });
         return { ok: false as const, reuse: true };
@@ -124,6 +124,9 @@ export async function registerAuthRoutes(app: FastifyInstance, ctx: ApiContext):
       return { ok: true as const, userId: session.userId, next };
     });
     if (!outcome.ok) {
+      // Leave cookies alone for the benign race: this response may arrive after the winning
+      // refresh and must not wipe its freshly rotated cookies. 409 tells the client to retry.
+      if ("benignRace" in outcome && outcome.benignRace) throw new AppError("CONFLICT", "Session was refreshed by another tab");
       clearSessionCookies(ctx, reply);
       if ("reuse" in outcome && outcome.reuse) ctx.logger.warn({ ip: req.ip }, "refresh token reuse detected; session family revoked");
       throw new AppError("UNAUTHORIZED", "Session expired");
