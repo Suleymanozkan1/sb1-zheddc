@@ -180,7 +180,7 @@ export class Persistence {
   consumeItemByInventoryId(userId: string, inventoryItemId: string) {
     return this.enqueue(userId, () =>
       withTransaction(this.prisma, async (tx) => {
-        const row = await tx.inventoryItem.findFirst({ where: { id: inventoryItemId, userId }, include: { item: true } });
+        const row = await tx.inventoryItem.findFirst({ where: { id: inventoryItemId, userId, inStash: false }, include: { item: true } });
         if (!row || row.item.type !== "CONSUMABLE") throw new AppError("NOT_FOUND", "Consumable not found");
         const meta = await consumeItem(tx, userId, row.item.key);
         return { itemKey: row.item.key, meta };

@@ -182,6 +182,7 @@ enum TransactionType {
   REFUND
   ADMIN_ADJUSTMENT
   POOL_FUNDING
+  ITEM_SALE
 }
 
 enum LedgerDirection {
@@ -282,6 +283,7 @@ model User {
   ageVerified          Boolean     @default(false)
   kycStatus            KycStatus   @default(NONE)
   inventorySlots       Int         @default(60)
+  stashSlots           Int         @default(100)
   lastLoginAt          DateTime?
   createdAt            DateTime    @default(now())
   updatedAt            DateTime    @updatedAt
@@ -476,6 +478,10 @@ model InventoryItem {
   equipped     Boolean    @default(false)
   /// Slot key while equipped, e.g. "WEAPON" or "SKIN:warrior". Unique per user when equipped (partial index).
   equippedSlot String?
+  /// Locked items cannot be sold (single or bulk).
+  locked       Boolean    @default(false)
+  /// Stored in the stash: does not use inventory slots and cannot be equipped or consumed.
+  inStash      Boolean    @default(false)
   source       ItemSource
   /// Idempotency key of the grant (loot drop id, purchase id...). Prevents duplicate pickups.
   sourceRef    String?    @unique
@@ -484,6 +490,7 @@ model InventoryItem {
 
   @@index([userId, equipped])
   @@index([userId, itemId])
+  @@index([userId, inStash])
 }
 
 // ───────────────────────────── Matches ─────────────────────────────

@@ -92,6 +92,12 @@ export interface InventoryItemDto {
   upgradeLevel: number;
   equipped: boolean;
   equippedSlot: string | null;
+  /** Locked items are skipped by selling. */
+  locked: boolean;
+  /** Stored in the stash (no inventory slot, cannot be equipped). */
+  inStash: boolean;
+  /** Gold paid if sold now; null when the item cannot be sold (skins, equipped). */
+  sellValue: string | null;
   effectiveStats: ItemStats;
   nextUpgradeCost: string | null;
   acquiredAt: string;

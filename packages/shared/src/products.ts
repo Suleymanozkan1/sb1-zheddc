@@ -10,7 +10,8 @@ export type ProductGrant =
   | { kind: "GEMS"; amount: number }
   | { kind: "GOLD"; amount: number }
   | { kind: "PREMIUM"; tier: Exclude<PremiumTier, "FREE">; days: number }
-  | { kind: "INVENTORY_SLOTS"; amount: number };
+  | { kind: "INVENTORY_SLOTS"; amount: number }
+  | { kind: "STASH_SLOTS"; amount: number };
 
 export interface ProductMetadata {
   grants: ProductGrant[];

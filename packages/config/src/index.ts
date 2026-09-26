@@ -101,6 +101,18 @@ export const envSchema = z.object({
   TITAN_REWARD_BASE: bigintStr.prefault("5000000"),
   TITAN_MIN_DAMAGE_SHARE_BPS: z.coerce.number().int().min(0).max(10_000).default(500),
   TITAN_REWARDS_PER_USER_DAY: z.coerce.number().int().min(0).default(3),
+  /** Gold paid when selling one item of each rarity (consumables: per unit, scaled by SELL_CONSUMABLE_BPS). */
+  SELL_GOLD_COMMON: z.coerce.number().int().min(0).default(12),
+  SELL_GOLD_UNCOMMON: z.coerce.number().int().min(0).default(30),
+  SELL_GOLD_RARE: z.coerce.number().int().min(0).default(80),
+  SELL_GOLD_EPIC: z.coerce.number().int().min(0).default(200),
+  SELL_GOLD_LEGENDARY: z.coerce.number().int().min(0).default(500),
+  SELL_GOLD_MYTHIC: z.coerce.number().int().min(0).default(1200),
+  SELL_CONSUMABLE_BPS: z.coerce.number().int().min(0).max(10_000).default(2_500),
+  /** Share of the gold spent on +N upgrades that selling returns (bps). Must stay below 100 %. */
+  SELL_UPGRADE_REFUND_BPS: z.coerce.number().int().min(0).max(9_000).default(2_500),
+  /** Maximum items per (bulk) sell request. */
+  SELL_MAX_ITEMS: z.coerce.number().int().min(1).max(500).default(100),
   BLOCKED_COUNTRIES: z.string().default(""),
   MIN_AGE: z.coerce.number().int().min(0).default(18),
   REQUIRE_KYC_FOR_WITHDRAWAL: bool.default(false),

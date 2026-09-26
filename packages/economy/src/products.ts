@@ -24,6 +24,7 @@ export function parseProductMetadata(json: unknown): ProductMetadata {
       case "GEMS":
       case "GOLD":
       case "INVENTORY_SLOTS":
+      case "STASH_SLOTS":
         if (!isPositiveInt(x.amount, 10_000_000)) break;
         return { kind: x.kind, amount: x.amount };
       case "PREMIUM":

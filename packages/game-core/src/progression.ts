@@ -43,6 +43,24 @@ export function itemUpgradeCost(rarity: Rarity, currentLevel: number): bigint | 
   return BigInt(Math.round(base * Math.pow(1.35, currentLevel)));
 }
 
+export interface SellRates {
+  gold: Record<Rarity, number>;
+  consumableBps: number;
+  upgradeRefundBps: number;
+}
+
+/**
+ * Gold paid for selling an item stack: the rarity value (consumables per unit, scaled down) plus a
+ * share of the gold spent on its upgrades. Always far below what buying or upgrading costs.
+ */
+export function itemSellValue(rates: SellRates, rarity: Rarity, consumable: boolean, upgradeLevel: number, quantity: number): bigint {
+  const base = rates.gold[rarity] ?? 0;
+  if (consumable) return BigInt(Math.floor((base * rates.consumableBps * Math.max(0, quantity)) / 10_000));
+  let spent = 0n;
+  for (let l = 0; l < Math.min(upgradeLevel, MAX_ITEM_UPGRADE); l++) spent += itemUpgradeCost(rarity, l) ?? 0n;
+  return BigInt(base) + (spent * BigInt(rates.upgradeRefundBps)) / 10_000n;
+}
+
 /** Multiplier applied to an item's stats at the given upgrade level (+5% per level, +100% at +20). */
 export function itemUpgradeMultiplier(upgradeLevel: number): number {
   return 1 + 0.05 * Math.max(0, Math.min(MAX_ITEM_UPGRADE, upgradeLevel));

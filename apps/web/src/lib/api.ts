@@ -94,9 +94,13 @@ const serverApi = {
   upgradeCharacter: (userCharacterId: string, stat: StatKey) =>
     request<{ characters: CharacterDto[]; balances: BalancesDto }>("POST", "/api/characters/upgrade", { userCharacterId, stat, idempotencyKey: newKey() }),
 
-  inventory: () => request<{ slots: number; items: InventoryItemDto[] }>("GET", "/api/inventory"),
+  inventory: () => request<{ slots: number; stashSlots: number; items: InventoryItemDto[] }>("GET", "/api/inventory"),
   equip: (inventoryItemId: string) => request<InventoryItemDto>("POST", "/api/inventory/equip", { inventoryItemId }),
   unequip: (inventoryItemId: string) => request<InventoryItemDto>("POST", "/api/inventory/unequip", { inventoryItemId }),
+  sellItems: (inventoryItemIds: string[]) =>
+    request<{ sold: number; gold: string; balances: BalancesDto }>("POST", "/api/inventory/sell", { inventoryItemIds, idempotencyKey: newKey() }),
+  lockItem: (inventoryItemId: string, locked: boolean) => request<{ ok: boolean }>("POST", "/api/inventory/lock", { inventoryItemId, locked }),
+  moveItem: (inventoryItemId: string, to: "inventory" | "stash") => request<{ ok: boolean }>("POST", "/api/inventory/move", { inventoryItemId, to }),
   upgradeItem: (inventoryItemId: string) => request<{ item: InventoryItemDto; balances: BalancesDto }>("POST", "/api/inventory/upgrade", { inventoryItemId, idempotencyKey: newKey() }),
 
   shop: () => request<ShopProductDto[]>("GET", "/api/shop"),

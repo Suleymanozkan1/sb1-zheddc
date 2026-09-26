@@ -49,6 +49,7 @@ export const TransactionType = [
   "REFUND",
   "ADMIN_ADJUSTMENT",
   "POOL_FUNDING",
+  "ITEM_SALE",
 ] as const;
 export type TransactionType = (typeof TransactionType)[number];
 

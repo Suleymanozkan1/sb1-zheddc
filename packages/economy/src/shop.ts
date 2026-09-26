@@ -150,6 +150,9 @@ export async function purchaseProduct(tx: Tx, config: AppConfig, logger: Logger,
         case "INVENTORY_SLOTS":
           await tx.user.update({ where: { id: input.userId }, data: { inventorySlots: { increment: g.amount } } });
           break;
+        case "STASH_SLOTS":
+          await tx.user.update({ where: { id: input.userId }, data: { stashSlots: { increment: g.amount } } });
+          break;
       }
     }
   }
@@ -173,7 +176,9 @@ export async function refundPurchase(tx: Tx, logger: Logger, purchaseId: string,
     for (const [gi, g] of meta.grants.entries()) {
       const ref = `purchase:${purchase.id}:${unit}:${gi}`;
       if (g.kind === "ITEM") {
-        await tx.inventoryItem.deleteMany({ where: { sourceRef: ref, userId: purchase.userId } });
+        const revoked = await tx.inventoryItem.deleteMany({ where: { sourceRef: ref, userId: purchase.userId } });
+        // A sold (or used up) item cannot be revoked; refunding anyway would pay twice.
+        if (revoked.count === 0) throw new AppError("CONFLICT", "A purchased item was already sold or used; use a balance adjustment instead");
       } else if (g.kind === "GEMS" || g.kind === "GOLD") {
         await postJournal(tx, {
           type: "REFUND",
@@ -192,6 +197,9 @@ export async function refundPurchase(tx: Tx, logger: Logger, purchaseId: string,
         }
       } else if (g.kind === "INVENTORY_SLOTS") {
         await tx.user.update({ where: { id: purchase.userId }, data: { inventorySlots: { decrement: g.amount } } });
+      } else if (g.kind === "STASH_SLOTS") {
+        const u = await tx.user.findUniqueOrThrow({ where: { id: purchase.userId }, select: { stashSlots: true } });
+        await tx.user.update({ where: { id: purchase.userId }, data: { stashSlots: Math.max(0, u.stashSlots - g.amount) } });
       } else if (g.kind === "PREMIUM") {
         const u = await tx.user.findUniqueOrThrow({ where: { id: purchase.userId } });
         if (u.premiumUntil) {

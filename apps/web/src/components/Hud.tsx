@@ -332,7 +332,12 @@ export function Hud({ onLeave, touch }: { onLeave: () => void; touch: TouchInput
 
       {/* Interaction prompts */}
       <div className="absolute bottom-36 left-1/2 flex -translate-x-1/2 flex-col items-center gap-1.5">
-        {h.nearLoot && <Prompt k="E" text={t("Pick up loot")} color="#fbbf24" />}
+        {h.nearLoot &&
+          (performance.now() < h.inventoryFullUntil ? (
+            <Prompt k="E" text={t("Inventory full — sell or stash items in the menu")} color="#f87171" />
+          ) : (
+            <Prompt k="E" text={t("Pick up loot")} color="#fbbf24" />
+          ))}
         {h.nearMerchant && <Prompt k="B" text={t("Buy 5 potions")} color="#38bdf8" />}
       </div>
 
