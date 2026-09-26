@@ -4,23 +4,26 @@ import { Page } from "../components/Layout";
 import { api } from "../lib/api";
 import { errorMessage, useApp } from "../lib/store";
 import { useAsync } from "../lib/useAsync";
+import { useT, useTc } from "../lib/i18n";
 
 export function Quests() {
   const { me, setBalances, toast } = useApp();
   const quests = useAsync(() => api.quests(), []);
+  const t = useT();
+  const tc = useTc();
   const [busy, setBusy] = useState<string | null>(null);
   const groups = ["DAILY", "WEEKLY", "SEASONAL", "ACHIEVEMENT"] as const;
   const d = me?.balances.cryptoDecimals ?? 6;
   const sym = me?.balances.cryptoSymbol ?? "ARENA";
 
   return (
-    <Page title="Quests" subtitle="Progress is tracked by the game server. Crypto quest rewards are paid from the season's capped reward budget.">
+    <Page title={t("Quests")} subtitle={t("Progress is tracked by the game server. Crypto quest rewards are paid from the season's capped reward budget.")}>
       {quests.loading && !quests.data ? (
         <Spinner />
       ) : (
         <div className="grid gap-4 lg:grid-cols-2">
           {groups.map((g) => (
-            <Panel key={g} title={g}>
+            <Panel key={g} title={tc("period", g, g)}>
               <ul className="flex flex-col gap-3">
                 {(quests.data ?? [])
                   .filter((q) => q.period === g)
@@ -29,14 +32,14 @@ export function Quests() {
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <h3 className="font-semibold">
-                            {q.name} {q.locked && <span className="text-xs text-amber-300">(premium)</span>}
+                            {tc("quest", q.key, q.name)} {q.locked && <span className="text-xs text-amber-300">({t("premium")})</span>}
                           </h3>
-                          <p className="text-xs text-slate-400">{q.description}</p>
+                          <p className="text-xs text-slate-400">{tc("questDesc", q.key, q.description)}</p>
                           <p className="mt-1 text-[11px] text-slate-300">
                             {q.rewards.gold !== "0" && `🪙 ${formatInt(q.rewards.gold)}  `}
                             {q.rewards.gems !== "0" && `💎 ${formatInt(q.rewards.gems)}  `}
                             {q.rewards.xp > 0 && `✨ ${q.rewards.xp} XP  `}
-                            {q.rewards.crypto !== "0" && <span className="text-fuchsia-300">◎ up to {formatToken(q.rewards.crypto, d)} {sym}</span>}
+                            {q.rewards.crypto !== "0" && <span className="text-fuchsia-300">◎ {t("up to {amount} {symbol}", { amount: formatToken(q.rewards.crypto, d), symbol: sym })}</span>}
                           </p>
                         </div>
                         <Button
@@ -50,7 +53,7 @@ export function Quests() {
                               const res = await api.claimQuest(q.key);
                               setBalances(res.balances);
                               const capped = res.rewards.find((r) => r.status !== "GRANTED" && r.reason);
-                              toast("success", capped ? `Claimed (${capped.reason})` : "Rewards claimed!");
+                              toast("success", capped ? t("Claimed ({reason})", { reason: capped.reason ?? "" }) : t("Rewards claimed!"));
                               await quests.reload();
                             } catch (err) {
                               toast("error", errorMessage(err));
@@ -59,7 +62,7 @@ export function Quests() {
                             }
                           }}
                         >
-                          {q.claimed ? "Claimed" : q.completed ? "Claim" : `${formatInt(q.progress)}/${formatInt(q.target)}`}
+                          {q.claimed ? t("Claimed") : q.completed ? t("Claim") : `${formatInt(q.progress)}/${formatInt(q.target)}`}
                         </Button>
                       </div>
                       <ProgressBar value={q.progress} max={q.target} className="mt-2" color={q.completed ? "#a3e635" : "#22d3ee"} />

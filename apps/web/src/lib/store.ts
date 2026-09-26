@@ -1,5 +1,6 @@
 import type { BalancesDto, MatchMode, MeDto } from "@cryptoarena/shared";
 import { create } from "zustand";
+import { t, type Lang } from "./i18n";
 
 export type Screen = "landing" | "dashboard" | "game" | "characters" | "inventory" | "shop" | "wallet" | "leaderboard" | "quests" | "settings";
 
@@ -24,6 +25,8 @@ interface AppState {
   mode: MatchMode;
   toasts: Toast[];
   settings: Settings;
+  lang: Lang;
+  setLang: (lang: Lang) => void;
   setMe: (me: MeDto | null) => void;
   setBalances: (b: BalancesDto) => void;
   go: (s: Screen) => void;
@@ -44,6 +47,16 @@ function loadSettings(): Settings {
   }
 }
 
+function loadLang(): Lang {
+  try {
+    const saved = localStorage.getItem("ca.lang");
+    if (saved === "en" || saved === "tr") return saved;
+  } catch {
+    /* storage unavailable */
+  }
+  return typeof navigator !== "undefined" && navigator.language.toLowerCase().startsWith("tr") ? "tr" : "en";
+}
+
 let toastId = 0;
 
 export const useApp = create<AppState>((set, get) => ({
@@ -59,6 +72,16 @@ export const useApp = create<AppState>((set, get) => ({
   mode: "CASUAL",
   toasts: [],
   settings: loadSettings(),
+  lang: loadLang(),
+  setLang: (lang) => {
+    try {
+      localStorage.setItem("ca.lang", lang);
+    } catch {
+      /* storage unavailable */
+    }
+    document.documentElement.lang = lang;
+    set({ lang });
+  },
   setMe: (me) => set({ me }),
   setBalances: (balances) => {
     const me = get().me;
@@ -92,5 +115,5 @@ export const useApp = create<AppState>((set, get) => ({
 }));
 
 export function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : "Something went wrong";
+  return err instanceof Error ? t(err.message) : t("Something went wrong");
 }

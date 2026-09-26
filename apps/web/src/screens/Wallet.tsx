@@ -9,12 +9,14 @@ import { api, newKey } from "../lib/api";
 import { errorMessage, useApp } from "../lib/store";
 import { useAsync } from "../lib/useAsync";
 import { useWalletAuth } from "../wallet/useWalletAuth";
+import { useT } from "../lib/i18n";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export function Wallet() {
   const { me, toast, setBalances } = useApp();
   const info = useAsync(() => api.wallet(), []);
+  const t = useT();
   const ledger = useAsync(() => api.ledger(), []);
   const wallet = useWallet();
   const { connection } = useConnection();
@@ -40,34 +42,34 @@ export function Wallet() {
 
   const deposit = async () => {
     setBusy("deposit");
-    setDepositStatus("Preparing transaction…");
+    setDepositStatus(t("Preparing transaction…"));
     try {
       parseUnits(depositAmount, d);
       const prep = await api.prepareDeposit(depositAmount);
       let signature: string;
       if (prep.mock || !prep.transaction) {
-        setDepositStatus("Simulating wallet transfer (SOLANA_MOCK)…");
+        setDepositStatus(t("Simulating wallet transfer (SOLANA_MOCK)…"));
         signature = (await api.mockSendDeposit(prep.depositId)).signature;
       } else {
-        if (!wallet.connected || !wallet.publicKey) throw new Error("Connect your wallet first");
-        if (wallet.publicKey.toBase58() !== prep.wallet) throw new Error(`Switch your wallet to ${shortAddress(prep.wallet)} (the one linked to this account)`);
+        if (!wallet.connected || !wallet.publicKey) throw new Error(t("Connect your wallet first"));
+        if (wallet.publicKey.toBase58() !== prep.wallet) throw new Error(t("Switch your wallet to {address} (the one linked to this account)", { address: shortAddress(prep.wallet) }));
         const tx = VersionedTransaction.deserialize(Uint8Array.from(getBase64Encoder().encode(prep.transaction)));
-        setDepositStatus("Approve the transfer in your wallet…");
+        setDepositStatus(t("Approve the transfer in your wallet…"));
         signature = await wallet.sendTransaction(tx, connection);
       }
-      setDepositStatus("Waiting for finalization on-chain…");
+      setDepositStatus(t("Waiting for finalization on-chain…"));
       for (let i = 0; i < 40; i++) {
         const res = await api.verifyDeposit(prep.depositId, signature);
         if (res.status === "CREDITED") {
-          toast("success", `Deposit of ${fmt(res.deposit.amount)} ${sym} credited`);
+          toast("success", t("Deposit of {amount} {symbol} credited", { amount: fmt(res.deposit.amount), symbol: sym }));
           setDepositStatus(null);
           await refresh();
           return;
         }
-        if (res.status === "FAILED") throw new Error(res.reason ?? "Deposit verification failed");
+        if (res.status === "FAILED") throw new Error(res.reason ?? t("Deposit verification failed"));
         await sleep(3000);
       }
-      setDepositStatus("Still confirming — it will be credited automatically once finalized.");
+      setDepositStatus(t("Still confirming — it will be credited automatically once finalized."));
     } catch (err) {
       toast("error", errorMessage(err));
       setDepositStatus(null);
@@ -82,7 +84,7 @@ export function Wallet() {
     try {
       const to = withdrawTo || w?.wallets[0]?.address || "";
       const res = await api.withdraw(withdrawAmount, to, withdrawKey);
-      toast("success", res.withdrawal.requiresReview ? "Withdrawal submitted for review" : "Withdrawal queued — it will be sent shortly");
+      toast("success", res.withdrawal.requiresReview ? t("Withdrawal submitted for review") : t("Withdrawal queued — it will be sent shortly"));
       setWithdrawKey(newKey());
       setWithdrawAmount("");
       await refresh();
@@ -94,53 +96,53 @@ export function Wallet() {
   };
 
   return (
-    <Page title="Wallet" subtitle={w ? `Network: ${w.network}${w.mint ? ` · Mint ${shortAddress(w.mint)}` : ""}` : undefined} actions={<Button onClick={() => void refresh()}>Refresh</Button>}>
+    <Page title={t("Wallet")} subtitle={w ? `${t("Network")}: ${w.network}${w.mint ? ` · Mint ${shortAddress(w.mint)}` : ""}` : undefined} actions={<Button onClick={() => void refresh()}>{t("Refresh")}</Button>}>
       {!w ? (
         info.error ? <p className="text-rose-300">{info.error}</p> : <Spinner />
       ) : (
         <div className="grid gap-4 xl:grid-cols-3">
-          <Panel title="Balances">
+          <Panel title={t("Balances")}>
             <div className="grid grid-cols-2 gap-4">
-              <Stat label={`Withdrawable (${sym})`} value={fmt(w.balances.cryptoReward)} accent="#e879f9" />
-              <Stat label={`Deposited (${sym})`} value={fmt(w.balances.cryptoSpendable)} accent="#a3e635" />
+              <Stat label={t("Withdrawable ({symbol})", { symbol: sym })} value={fmt(w.balances.cryptoReward)} accent="#e879f9" />
+              <Stat label={t("Deposited ({symbol})", { symbol: sym })} value={fmt(w.balances.cryptoSpendable)} accent="#a3e635" />
             </div>
             <p className="mt-3 text-xs text-slate-400">
-              Deposited funds are for shop purchases (gems, passes, items). Only rewards earned through gameplay are withdrawable. There is no interest, yield or guaranteed return.
+              {t("Deposited funds are for shop purchases (gems, passes, items). Only rewards earned through gameplay are withdrawable. There is no interest, yield or guaranteed return.")}
             </p>
-            <h3 className="mt-5 mb-2 text-xs font-bold tracking-widest text-slate-400 uppercase">Linked wallets</h3>
+            <h3 className="mt-5 mb-2 text-xs font-bold tracking-widest text-slate-400 uppercase">{t("Linked wallets")}</h3>
             {w.wallets.length === 0 ? (
               <Button variant="primary" loading={linking} onClick={() => void linkWallet()}>
-                Connect & verify wallet
+                {t("Connect & verify wallet")}
               </Button>
             ) : (
               <ul className="text-sm">
                 {w.wallets.map((x) => (
                   <li key={x.address} className="flex justify-between rounded-lg bg-white/5 px-3 py-2">
                     <span className="font-mono">{shortAddress(x.address)}</span>
-                    {x.isPrimary && <span className="text-xs text-cyan-300">primary</span>}
+                    {x.isPrimary && <span className="text-xs text-cyan-300">{t("primary")}</span>}
                   </li>
                 ))}
               </ul>
             )}
           </Panel>
 
-          <Panel title="Deposit Crypto">
+          <Panel title={t("Deposit Crypto")}>
             <p className="mb-3 text-sm text-slate-400">
-              The server builds an SPL token transfer of {sym} to the treasury. Your wallet signs it; the server verifies network, mint, amount, recipient, reference and finality before crediting — exactly once.
+              {t("The server builds an SPL token transfer of {symbol} to the treasury. Your wallet signs it; the server verifies network, mint, amount, recipient, reference and finality before crediting — exactly once.", { symbol: sym })}
             </p>
             <div className="flex gap-2">
-              <input value={depositAmount} onChange={(e) => setDepositAmount(e.target.value)} className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 outline-none focus:border-cyan-400" placeholder="Amount" inputMode="decimal" />
+              <input value={depositAmount} onChange={(e) => setDepositAmount(e.target.value)} className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 outline-none focus:border-cyan-400" placeholder={t("Amount")} inputMode="decimal" />
               <Button variant="primary" loading={busy === "deposit"} disabled={w.wallets.length === 0 || me.isGuest} onClick={() => void deposit()}>
-                Deposit
+                {t("Deposit")}
               </Button>
             </div>
             {depositStatus && <p className="mt-2 text-xs text-cyan-300">{depositStatus}</p>}
-            {!w.mint && <p className="mt-2 text-xs text-amber-300">Deposits are not configured on this server (REWARD_TOKEN_MINT).</p>}
+            {!w.mint && <p className="mt-2 text-xs text-amber-300">{t("Deposits are not configured on this server (REWARD_TOKEN_MINT).")}</p>}
           </Panel>
 
-          <Panel title="Withdraw">
+          <Panel title={t("Withdraw")}>
             <div className="flex flex-col gap-2">
-              <input value={withdrawAmount} onChange={(e) => setWithdrawAmount(e.target.value)} className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 outline-none focus:border-cyan-400" placeholder={`Amount (${sym})`} inputMode="decimal" />
+              <input value={withdrawAmount} onChange={(e) => setWithdrawAmount(e.target.value)} className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 outline-none focus:border-cyan-400" placeholder={`${t("Amount")} (${sym})`} inputMode="decimal" />
               <select value={withdrawTo} onChange={(e) => setWithdrawTo(e.target.value)} className="rounded-xl border border-white/10 bg-black/30 px-3 py-2">
                 {w.wallets.map((x) => (
                   <option key={x.address} value={x.address}>
@@ -149,30 +151,30 @@ export function Wallet() {
                 ))}
               </select>
               <Button variant="primary" loading={busy === "withdraw"} disabled={!withdrawAmount || w.wallets.length === 0} onClick={() => void withdraw()}>
-                Withdraw
+                {t("Withdraw")}
               </Button>
               <ul className="mt-1 text-[11px] text-slate-400">
                 <li>
-                  Min {fmt(w.limits.minWithdrawal)} · Max {fmt(w.limits.maxWithdrawal)} · Fee {fmt(w.limits.fee)} {sym}
+                  {t("Min {min} · Max {max} · Fee {fee} {symbol}", { min: fmt(w.limits.minWithdrawal), max: fmt(w.limits.maxWithdrawal), fee: fmt(w.limits.fee), symbol: sym })}
                 </li>
                 <li>
-                  Daily limit {fmt(w.limits.dailyLimit)} (used {fmt(w.limits.withdrawnToday)}) · Cooldown {Math.round(w.limits.cooldownSeconds / 60)} min
+                  {t("Daily limit {limit} (used {used}) · Cooldown {minutes} min", { limit: fmt(w.limits.dailyLimit), used: fmt(w.limits.withdrawnToday), minutes: Math.round(w.limits.cooldownSeconds / 60) })}
                 </li>
-                <li>Account must be {w.limits.minAccountAgeHours}h old. Only verified wallets of this account can receive withdrawals.</li>
-                {w.limits.nextWithdrawalAt && <li className="text-amber-300">Next withdrawal: {new Date(w.limits.nextWithdrawalAt).toLocaleString()}</li>}
+                <li>{t("Account must be {hours}h old. Only verified wallets of this account can receive withdrawals.", { hours: w.limits.minAccountAgeHours })}</li>
+                {w.limits.nextWithdrawalAt && <li className="text-amber-300">{t("Next withdrawal: {date}", { date: new Date(w.limits.nextWithdrawalAt).toLocaleString() })}</li>}
               </ul>
             </div>
           </Panel>
 
-          <Panel title="Withdrawals" className="xl:col-span-2">
+          <Panel title={t("Withdrawals")} className="xl:col-span-2">
             <Table
-              columns={["Date", "Amount", "Status", "Transaction", ""]}
+              columns={[t("Date"), t("Amount"), t("Status"), t("Transaction"), ""]}
               rows={w.withdrawals.map((x) => [
                 new Date(x.createdAt).toLocaleString(),
                 `${fmt(x.amount)} ${sym}`,
                 <span className={x.status === "COMPLETED" ? "text-lime-300" : x.status === "FAILED" ? "text-rose-300" : "text-amber-300"}>
                   {x.status}
-                  {x.requiresReview && x.status === "PENDING" ? " (review)" : ""}
+                  {x.requiresReview && x.status === "PENDING" ? ` (${t("review")})` : ""}
                 </span>,
                 x.explorerUrl ? (
                   <a className="text-cyan-300 underline" href={x.explorerUrl} target="_blank" rel="noreferrer">
@@ -195,21 +197,21 @@ export function Wallet() {
                       }
                     }}
                   >
-                    Cancel
+                    {t("Cancel")}
                   </Button>
                 ) : null,
               ])}
             />
           </Panel>
-          <Panel title="Deposits">
+          <Panel title={t("Deposits")}>
             <Table
-              columns={["Date", "Amount", "Status"]}
+              columns={[t("Date"), t("Amount"), t("Status")]}
               rows={w.deposits.map((x) => [new Date(x.createdAt).toLocaleDateString(), `${fmt(x.amount)}`, <span title={x.failureReason ?? ""}>{x.status}</span>])}
             />
           </Panel>
-          <Panel title="Ledger (append-only)" className="xl:col-span-3">
+          <Panel title={t("Ledger (append-only)")} className="xl:col-span-3">
             <Table
-              columns={["Date", "Type", "Account", "Change", "Balance after", "Reference"]}
+              columns={[t("Date"), t("Type"), t("Account"), t("Balance change"), t("Balance after"), t("Reference")]}
               rows={(ledger.data ?? []).map((e) => {
                 const isCrypto = e.asset === "CRYPTO";
                 const amt = isCrypto ? fmt(e.amount) : e.amount;

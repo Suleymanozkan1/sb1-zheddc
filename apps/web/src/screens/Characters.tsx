@@ -1,8 +1,10 @@
 import { StatKey, type BalancesDto, type CharacterDto, type SkillDto } from "@cryptoarena/shared";
-import { Button, RarityBadge, Spinner, cx } from "@cryptoarena/ui";
+import { Button, Spinner, cx } from "@cryptoarena/ui";
 import { useState } from "react";
 import { CharacterCard, HeroArt, StatRadar, StatsGrid, accentVars, characterColor, roleOf } from "../components/CharacterCard";
 import { Page } from "../components/Layout";
+import { RarityTag } from "../components/RarityTag";
+import { useT, useTc } from "../lib/i18n";
 import { api } from "../lib/api";
 import { price } from "../lib/format";
 import { errorMessage, useApp } from "../lib/store";
@@ -11,6 +13,8 @@ import { useAsync } from "../lib/useAsync";
 const STAT_LABEL: Record<StatKey, string> = { HP: "Health", DAMAGE: "Damage", ARMOR: "Armor", SPEED: "Speed", ATTACK_SPEED: "Attack speed", CRIT_CHANCE: "Crit chance" };
 
 function AbilityCard({ keyLabel, kind, skill, color }: { keyLabel: string; kind: string; skill: SkillDto; color: string }) {
+  const t = useT();
+  const tc = useTc();
   return (
     <div className="flex gap-3 rounded-md border border-white/5 bg-slate-950/60 p-2.5">
       <div className="grid h-11 w-11 shrink-0 rotate-45 place-items-center rounded-lg border" style={{ borderColor: `${color}99`, background: `radial-gradient(circle, ${color}33, #020617)`, boxShadow: `0 0 14px -2px ${color}` }}>
@@ -20,11 +24,11 @@ function AbilityCard({ keyLabel, kind, skill, color }: { keyLabel: string; kind:
       </div>
       <div className="min-w-0">
         <div className="flex items-baseline gap-2">
-          <span className="font-display text-sm font-bold text-white">{skill.name}</span>
-          <span className="font-display text-[9px] font-bold tracking-widest text-slate-500 uppercase">{kind}</span>
+          <span className="font-display text-sm font-bold text-white">{tc("skill", skill.key, skill.name)}</span>
+          <span className="font-display text-[9px] font-bold tracking-widest text-slate-500 uppercase">{t(kind)}</span>
           <span className="ml-auto shrink-0 font-mono text-[11px] text-slate-400">{skill.cooldownMs / 1000}s</span>
         </div>
-        <p className="text-xs leading-snug text-slate-400">{skill.description}</p>
+        <p className="text-xs leading-snug text-slate-400">{tc("skillDesc", skill.key, skill.description)}</p>
       </div>
     </div>
   );
@@ -32,6 +36,7 @@ function AbilityCard({ keyLabel, kind, skill, color }: { keyLabel: string; kind:
 
 function Stage({ c }: { c: CharacterDto }) {
   const color = characterColor(c.key);
+  const t = useT();
   return (
     <div className="relative grid h-[300px] place-items-center overflow-hidden md:h-[360px]">
       {/* light column + floor */}
@@ -49,7 +54,7 @@ function Stage({ c }: { c: CharacterDto }) {
       </div>
       {c.progress && (
         <div className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-sm border bg-slate-950/90 px-3 py-0.5 font-display text-xs font-black tracking-widest" style={{ borderColor: `${color}88`, color }}>
-          LEVEL {c.progress.level}
+          {t("LEVEL")} {c.progress.level}
         </div>
       )}
     </div>
@@ -59,6 +64,8 @@ function Stage({ c }: { c: CharacterDto }) {
 export function Characters() {
   const { me, selectedCharacterId, selectCharacter, setBalances, toast } = useApp();
   const chars = useAsync(() => api.characters(), []);
+  const t = useT();
+  const tc = useTc();
   const [focus, setFocus] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const list = chars.data ?? [];
@@ -82,7 +89,7 @@ export function Characters() {
   const isEquipped = !!current?.progress && current.progress.userCharacterId === selectedCharacterId;
 
   return (
-    <Page title="Choose your hero" subtitle="Five classes, levels 1–50. Level up to earn stat points, then invest gold to raise stats.">
+    <Page title={t("Choose your hero")} subtitle={t("Five classes, levels 1–50. Level up to earn stat points, then invest gold to raise stats.")}>
       {chars.loading && !chars.data ? (
         <Spinner />
       ) : (
@@ -94,17 +101,17 @@ export function Characters() {
               <div key={current.key} className="hero-in flex flex-col gap-3">
                 <div>
                   <div className="font-display text-[10px] font-bold tracking-[0.4em] uppercase" style={{ color }}>
-                    {roleOf(current.key)} · {current.class}
+                    {roleOf(current.key)} · {tc("char", current.key, current.class)}
                   </div>
                   <h2 className="font-display text-4xl font-black tracking-wide text-white md:text-5xl" style={{ textShadow: `0 0 24px ${color}88` }}>
-                    {current.name}
+                    {tc("char", current.key, current.name)}
                   </h2>
                   <div className="mt-1 flex items-center gap-2">
-                    <RarityBadge rarity={current.rarity} />
-                    {current.isStarter && <span className="font-display text-[10px] font-bold tracking-widest text-slate-400">STARTER</span>}
+                    <RarityTag rarity={current.rarity} />
+                    {current.isStarter && <span className="font-display text-[10px] font-bold tracking-widest text-slate-400">{t("STARTER")}</span>}
                   </div>
                 </div>
-                <p className="text-sm leading-relaxed text-slate-300">{current.description}</p>
+                <p className="text-sm leading-relaxed text-slate-300">{tc("charDesc", current.key, current.description)}</p>
                 <div className="flex flex-col gap-2">
                   <AbilityCard keyLabel="Q" kind="Skill" skill={current.skill} color="#22d3ee" />
                   <AbilityCard keyLabel="R" kind="Ultimate" skill={current.ultimate} color="#e879f9" />
@@ -114,29 +121,29 @@ export function Characters() {
                   {current.owned && current.progress ? (
                     <>
                       <Button size="lg" variant={isEquipped ? "success" : "primary"} className="min-w-52" onClick={() => selectCharacter(current.progress!.userCharacterId)}>
-                        {isEquipped ? "✓ Selected" : "Select for battle"}
+                        {isEquipped ? `✓ ${t("Selected")}` : t("Select for battle")}
                       </Button>
                       {current.progress.statPoints > 0 && (
                         <span className="font-display text-xs font-bold text-amber-300">
-                          {current.progress.statPoints} stat point{current.progress.statPoints === 1 ? "" : "s"} to spend ↓
+                          {t(current.progress.statPoints === 1 ? "{n} stat point to spend" : "{n} stat points to spend", { n: current.progress.statPoints })} ↓
                         </span>
                       )}
                     </>
                   ) : current.unlockProduct ? (
                     <>
-                      <Button size="lg" variant="primary" className="min-w-52" loading={busy === "unlock"} onClick={() => act("unlock", () => api.unlockCharacter(current.key, current.unlockProduct!.sku), `${current.name} unlocked!`)}>
-                        Unlock for {price(current.unlockProduct.price, current.unlockProduct.currency, me?.balances)}
+                      <Button size="lg" variant="primary" className="min-w-52" loading={busy === "unlock"} onClick={() => act("unlock", () => api.unlockCharacter(current.key, current.unlockProduct!.sku), t("{name} unlocked!", { name: tc("char", current.key, current.name) }))}>
+                        {t("Unlock for {price}", { price: price(current.unlockProduct.price, current.unlockProduct.currency, me?.balances) })}
                       </Button>
-                      <p className="text-xs text-slate-400">More unlock options are available in the Shop.</p>
+                      <p className="text-xs text-slate-400">{t("More unlock options are available in the Shop.")}</p>
                     </>
                   ) : (
-                    <p className="text-sm text-slate-400">Not available right now.</p>
+                    <p className="text-sm text-slate-400">{t("Not available right now.")}</p>
                   )}
                 </div>
               </div>
 
               <div className="flex flex-col items-center gap-3 border-t border-white/5 pt-4 lg:border-t-0 lg:border-l lg:pt-0 lg:pl-4">
-                <div className="font-display text-[10px] font-bold tracking-[0.3em] text-slate-400">COMBAT PROFILE</div>
+                <div className="font-display text-[10px] font-bold tracking-[0.3em] text-slate-400">{t("COMBAT PROFILE")}</div>
                 <StatRadar c={current} all={list} size={210} />
                 <StatsGrid c={current} />
               </div>
@@ -145,10 +152,10 @@ export function Characters() {
 
           <section>
             <div className="mb-2 flex items-center gap-3">
-              <h3 className="font-display text-xs font-bold tracking-[0.35em] text-slate-400">ROSTER</h3>
+              <h3 className="font-display text-xs font-bold tracking-[0.35em] text-slate-400">{t("ROSTER")}</h3>
               <div className="h-px flex-1 bg-gradient-to-r from-white/15 to-transparent" />
               <span className="font-mono text-xs text-slate-500">
-                {list.filter((c) => c.owned).length}/{list.length} owned
+                {t("{owned}/{total} owned", { owned: list.filter((c) => c.owned).length, total: list.length })}
               </span>
             </div>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
@@ -161,19 +168,19 @@ export function Characters() {
           {current?.owned && current.progress && (
             <section className="hud-panel p-4" style={accentVars(current.key)}>
               <div className="mb-3 flex flex-wrap items-center gap-3">
-                <h3 className="font-display text-xs font-bold tracking-[0.35em] text-slate-300">UPGRADES</h3>
+                <h3 className="font-display text-xs font-bold tracking-[0.35em] text-slate-300">{t("UPGRADES")}</h3>
                 <div className="flex items-center gap-1">
                   {Array.from({ length: Math.min(10, Math.max(current.progress.statPoints, 1)) }, (_, i) => (
                     <span key={i} className={cx("h-2.5 w-2.5 rotate-45", i < current.progress!.statPoints ? "" : "bg-slate-700")} style={i < current.progress!.statPoints ? { background: color, boxShadow: `0 0 6px ${color}` } : undefined} />
                   ))}
                 </div>
                 <span className="text-sm text-slate-300">
-                  Stat points: <b style={{ color }}>{current.progress.statPoints}</b>
+                  {t("Stat points:")} <b style={{ color }}>{current.progress.statPoints}</b>
                 </span>
               </div>
               {current.progress.statPoints < 1 && (
                 <p className="mb-3 text-xs text-slate-400">
-                  No stat points left. Each level gives 2 points — earn XP in the arena by defeating creatures and rivals, then come back to upgrade.
+                  {t("No stat points left. Each level gives 2 points — earn XP in the arena by defeating creatures and rivals, then come back to upgrade.")}
                 </p>
               )}
               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -183,7 +190,7 @@ export function Characters() {
                     <div key={k} className="flex items-center gap-3 rounded-md border border-white/5 bg-slate-950/60 px-3 py-2">
                       <div className="min-w-0 flex-1">
                         <div className="flex items-baseline justify-between text-sm">
-                          <span className="text-slate-200">{STAT_LABEL[k]}</span>
+                          <span className="text-slate-200">{t(STAT_LABEL[k])}</span>
                           <span className="font-display text-xs font-bold" style={{ color }}>
                             +{lvl}
                           </span>
@@ -198,7 +205,7 @@ export function Characters() {
                         size="sm"
                         disabled={current.progress!.statPoints < 1}
                         loading={busy === k}
-                        onClick={() => act(k, () => api.upgradeCharacter(current.progress!.userCharacterId, k), `${STAT_LABEL[k]} upgraded`)}
+                        onClick={() => act(k, () => api.upgradeCharacter(current.progress!.userCharacterId, k), t("{stat} upgraded", { stat: t(STAT_LABEL[k]) }))}
                       >
                         +1 · {current.progress!.upgradeCosts[k]} 🪙
                       </Button>

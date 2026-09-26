@@ -231,6 +231,11 @@ pnpm --filter @cryptoarena/web build && pnpm --filter @cryptoarena/web preview
 
 The Phaser bundle is lazy-loaded when entering the arena. `VITE_GAME_URL` points to the Colyseus server.
 
+**Languages.** The client ships in English and Turkish (EN/TR toggle in the top bar and on the landing page,
+plus Settings → Language; defaults to the browser language and is remembered). UI strings use the English text
+as the key (`apps/web/src/lib/i18n.ts`); game content (heroes, abilities, creatures, items, products, quests) is
+translated by its stable key in `apps/web/src/lib/i18n.tr.ts`, falling back to the server's English text.
+
 **Offline demo.** *Try the offline demo* on the landing page (or a build with `VITE_DEMO_ONLY=true`, which
 shows only the demo) runs the arena entirely in the browser: the same `ArenaSimulation` the game server
 uses (`packages/game-core/src/sim`) plus bots, behind the `ArenaLink` interface the Phaser scene consumes.

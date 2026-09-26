@@ -57,11 +57,11 @@ export function Panel({ title, actions, className, children }: { title?: ReactNo
   );
 }
 
-export function RarityBadge({ rarity }: { rarity: Rarity }) {
+export function RarityBadge({ rarity, label }: { rarity: Rarity; label?: string }) {
   const color = RARITY_COLORS[rarity];
   return (
     <span className="rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider" style={{ color, border: `1px solid ${color}66`, background: `${color}14` }}>
-      {rarity}
+      {label ?? rarity}
     </span>
   );
 }

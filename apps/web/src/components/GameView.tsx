@@ -8,6 +8,7 @@ import { DemoArena } from "../demo/arena";
 import { GameConnection, type ArenaLink } from "../game/net";
 import { api } from "../lib/api";
 import { isDemo } from "../lib/demo";
+import { t as tNow, useT } from "../lib/i18n";
 import { errorMessage, useApp } from "../lib/store";
 import { Hud } from "./Hud";
 
@@ -28,6 +29,7 @@ export function GameView() {
   const [error, setError] = useState<string | null>(null);
   const [touch, setTouch] = useState<TouchInput | null>(null);
   const [ready, setReady] = useState(false);
+  const t = useT();
   const connRef = useRef<ArenaLink | null>(null);
 
   useEffect(() => {
@@ -36,7 +38,7 @@ export function GameView() {
     useHud.getState().reset();
 
     (async () => {
-      if (!selectedCharacterId) throw new Error("Select a character first");
+      if (!selectedCharacterId) throw new Error(tNow("Select a character first"));
       const conn = await serial(async () => {
         if (cancelled) return null;
         const { ticket } = await api.gameTicket(selectedCharacterId, mode);
@@ -51,8 +53,8 @@ export function GameView() {
       connRef.current = conn;
       conn.onLeave((code) => {
         // 4011: the server released this seat (session moved to another arena or could not be verified).
-        if (code === 4011) useHud.getState().set({ error: "Your arena session ended because it could not be kept on this server. Please rejoin." });
-        else if (code !== 1000 && code !== 4000) useHud.getState().set({ error: `Disconnected (${code})` });
+        if (code === 4011) useHud.getState().set({ error: tNow("Your arena session ended because it could not be kept on this server. Please rejoin.") });
+        else if (code !== 1000 && code !== 4000) useHud.getState().set({ error: tNow("Disconnected ({code})", { code }) });
       });
       // Wait for the first full state (map seed) before booting Phaser.
       await conn.ready();
@@ -105,13 +107,13 @@ export function GameView() {
       {!ready && !error && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-cyan-300">
           <Spinner />
-          <span className="font-display tracking-widest">ENTERING ARENA…</span>
+          <span className="font-display tracking-widest">{t("ENTERING ARENA…")}</span>
         </div>
       )}
       {(error || hudError) && (
         <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-4 bg-black/70">
           <p className="max-w-md text-center text-rose-300">{error ?? hudError}</p>
-          <Button onClick={() => go("dashboard")}>Back to menu</Button>
+          <Button onClick={() => go("dashboard")}>{t("Back to menu")}</Button>
         </div>
       )}
     </div>

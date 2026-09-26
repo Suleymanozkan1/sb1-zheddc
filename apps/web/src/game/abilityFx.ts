@@ -2,6 +2,7 @@
 // simulation) already decided every hit; these only make the cast readable and punchy.
 import type { AbilityDef } from "@cryptoarena/game-core";
 import Phaser from "phaser";
+import { tc } from "../lib/i18n";
 
 const DISPLAY_FONT = "Orbitron, Inter, system-ui, sans-serif";
 
@@ -45,7 +46,7 @@ const ringScale = (radius: number): number => (radius * 2) / 220;
 export function playAbility(host: FxHost, t: FxTarget, ability: AbilityDef, kind: "skill" | "ultimate", aim: number, isSelf: boolean): void {
   const color = COLORS[ability.key] ?? (kind === "ultimate" ? 0xe879f9 : 0x22d3ee);
   castPose(host, t, color, kind);
-  callout(host, t, ability.name, color, kind);
+  callout(host, t, tc("skill", ability.key, ability.name), color, kind);
   if (isSelf) host.shake(kind === "ultimate" ? 220 : 110, kind === "ultimate" ? 0.008 : 0.004);
 
   for (const e of ability.effects) {

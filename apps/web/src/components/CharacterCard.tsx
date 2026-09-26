@@ -1,8 +1,10 @@
 import { CHARACTERS } from "@cryptoarena/game-core";
 import type { CharacterDto, CombatStats } from "@cryptoarena/shared";
-import { RarityBadge, cx } from "@cryptoarena/ui";
+import { cx } from "@cryptoarena/ui";
 import { useMemo, type CSSProperties } from "react";
 import { heroImage } from "../game/art/characters";
+import { t as tNow, useT, useTc } from "../lib/i18n";
+import { RarityTag } from "./RarityTag";
 
 export function hex(color: number): string {
   return `#${color.toString(16).padStart(6, "0")}`;
@@ -20,8 +22,9 @@ export function accentVars(key: string): CSSProperties {
 
 const ROLE: Record<string, string> = { warrior: "Bruiser", assassin: "Burst", tank: "Vanguard", ranger: "Marksman", mage: "Arcanist" };
 
+/** Role label in the current language (callers re-render on language change via useT). */
 export function roleOf(key: string): string {
-  return ROLE[key] ?? "Hero";
+  return tNow(ROLE[key] ?? "Hero");
 }
 
 /** Painted hero sprite (same art as in the arena), facing up. */
@@ -66,11 +69,12 @@ const STAT_ROWS: { key: keyof CombatStats; label: string; fmt: (v: number) => st
 
 export function StatsGrid({ c }: { c: CharacterDto }) {
   const s = c.progress?.stats ?? c.base;
+  const t = useT();
   return (
     <div className="grid grid-cols-4 gap-1.5 text-xs">
       {STAT_ROWS.map((r) => (
         <div key={r.key} className="rounded-md border border-white/5 bg-slate-950/60 px-2 py-1.5">
-          <div className="text-[9px] font-bold tracking-widest text-slate-500 uppercase">{r.label}</div>
+          <div className="text-[9px] font-bold tracking-widest text-slate-500 uppercase">{t(r.label)}</div>
           <div className="font-display text-sm font-bold text-slate-100 tabular-nums">{r.fmt(s[r.key])}</div>
         </div>
       ))}
@@ -89,6 +93,7 @@ const RADAR_AXES: { key: keyof CombatStats; label: string }[] = [
 
 /** Hexagonal stat radar, normalised against the strongest hero on each axis. */
 export function StatRadar({ c, all, size = 220 }: { c: CharacterDto; all: CharacterDto[]; size?: number }) {
+  const t = useT();
   const color = characterColor(c.key);
   const stats = c.progress?.stats ?? c.base;
   const r = size / 2 - 28;
@@ -111,7 +116,7 @@ export function StatRadar({ c, all, size = 220 }: { c: CharacterDto; all: Charac
           <g key={a.key}>
             <line x1={mid} y1={mid} x2={x} y2={y} stroke="rgb(148 163 184 / 0.15)" />
             <text x={lx} y={ly} textAnchor="middle" dominantBaseline="middle" className="fill-slate-400 font-display" fontSize={9} fontWeight={700} letterSpacing={1}>
-              {a.label}
+              {t(a.label)}
             </text>
           </g>
         );
@@ -127,13 +132,15 @@ export function StatRadar({ c, all, size = 220 }: { c: CharacterDto; all: Charac
 
 /** Roster card for the character select grid. */
 export function CharacterCard({ c, selected, equipped, onClick }: { c: CharacterDto; selected?: boolean; equipped?: boolean; onClick?: () => void }) {
+  const t = useT();
+  const tc = useTc();
   return (
     <button onClick={onClick} className={cx("roster-card hex-bg group flex w-full flex-col items-center px-3 pt-3 pb-3 text-left", selected && "active")} style={accentVars(c.key)}>
       <div className="flex w-full items-center justify-between">
         <span className="font-display text-[9px] font-bold tracking-[0.25em] uppercase" style={{ color: characterColor(c.key) }}>
           {roleOf(c.key)}
         </span>
-        {equipped && <span className="rounded-sm bg-emerald-400/15 px-1.5 font-display text-[9px] font-bold tracking-widest text-emerald-300">EQUIPPED</span>}
+        {equipped && <span className="rounded-sm bg-emerald-400/15 px-1.5 font-display text-[9px] font-bold tracking-widest text-emerald-300">{t("EQUIPPED")}</span>}
       </div>
       <div className="relative my-1 grid h-28 w-full place-items-center">
         <div className="absolute h-20 w-20 rounded-full opacity-60 blur-xl" style={{ background: characterColor(c.key) }} />
@@ -151,16 +158,16 @@ export function CharacterCard({ c, selected, equipped, onClick }: { c: Character
       </div>
       <div className="flex w-full items-end justify-between gap-2">
         <div className="min-w-0">
-          <h3 className="truncate font-display text-sm font-black tracking-wide text-white">{c.name}</h3>
-          <RarityBadge rarity={c.rarity} />
+          <h3 className="truncate font-display text-sm font-black tracking-wide text-white">{tc("char", c.key, c.name)}</h3>
+          <RarityTag rarity={c.rarity} />
         </div>
         {c.progress ? (
           <div className="text-right">
-            <div className="font-display text-[9px] font-bold tracking-widest text-slate-500">LEVEL</div>
+            <div className="font-display text-[9px] font-bold tracking-widest text-slate-500">{t("LEVEL")}</div>
             <div className="font-display text-xl leading-none font-black text-white">{c.progress.level}</div>
           </div>
         ) : (
-          <span className="font-display text-[10px] font-bold tracking-widest text-amber-300">LOCKED</span>
+          <span className="font-display text-[10px] font-bold tracking-widest text-amber-300">{t("LOCKED")}</span>
         )}
       </div>
       {c.progress && (
