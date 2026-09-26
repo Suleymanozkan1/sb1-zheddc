@@ -11,3 +11,6 @@ export * from "./npcs";
 export * from "./items";
 export * from "./anticheat";
 export * from "./rewardRules";
+export * from "./sim/types";
+export * from "./sim/simulation";
+export * from "./sim/bots";

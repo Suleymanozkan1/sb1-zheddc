@@ -26,9 +26,7 @@ import type {
 } from "@cryptoarena/shared";
 import { z } from "zod";
 import type { Persistence } from "./persistence";
-import { BotController } from "./sim/bots";
-import { ArenaSimulation } from "./sim/simulation";
-import type { EntityKind, Killer, SimEvents, SimLoot, SimNpc, SimPlayer, SimResource } from "./sim/types";
+import { ArenaSimulation, BotController, type EntityKind, type Killer, type SimEvents, type SimLoot, type SimNpc, type SimPlayer, type SimResource } from "@cryptoarena/game-core";
 import { ArenaState, LootState, NpcState, PlayerState, ProjectileState, ResourceState } from "./state";
 import type { TicketVerifier } from "./tickets";
 

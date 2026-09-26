@@ -4,8 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import { ArenaScene } from "../game/ArenaScene";
 import { useHud } from "../game/hud";
 import type { TouchInput } from "../game/input";
-import { GameConnection } from "../game/net";
+import { DemoArena } from "../demo/arena";
+import { GameConnection, type ArenaLink } from "../game/net";
 import { api } from "../lib/api";
+import { isDemo } from "../lib/demo";
 import { errorMessage, useApp } from "../lib/store";
 import { Hud } from "./Hud";
 
@@ -26,7 +28,7 @@ export function GameView() {
   const [error, setError] = useState<string | null>(null);
   const [touch, setTouch] = useState<TouchInput | null>(null);
   const [ready, setReady] = useState(false);
-  const connRef = useRef<GameConnection | null>(null);
+  const connRef = useRef<ArenaLink | null>(null);
 
   useEffect(() => {
     let game: Phaser.Game | null = null;
@@ -38,7 +40,7 @@ export function GameView() {
       const conn = await serial(async () => {
         if (cancelled) return null;
         const { ticket } = await api.gameTicket(selectedCharacterId, mode);
-        const joined = await GameConnection.join(ticket, mode);
+        const joined: ArenaLink = isDemo() ? new DemoArena(selectedCharacterId, mode) : await GameConnection.join(ticket, mode);
         if (cancelled) {
           await joined.leave();
           return null;
@@ -47,16 +49,13 @@ export function GameView() {
       });
       if (!conn) return;
       connRef.current = conn;
-      conn.room.onLeave((code) => {
+      conn.onLeave((code) => {
         // 4011: the server released this seat (session moved to another arena or could not be verified).
         if (code === 4011) useHud.getState().set({ error: "Your arena session ended because it could not be kept on this server. Please rejoin." });
         else if (code !== 1000 && code !== 4000) useHud.getState().set({ error: `Disconnected (${code})` });
       });
       // Wait for the first full state (map seed) before booting Phaser.
-      await new Promise<void>((resolve) => {
-        if (conn.state?.mapSeed) return resolve();
-        conn.room.onStateChange.once(() => resolve());
-      });
+      await conn.ready();
       // Canvas text needs the web fonts ready before it is rasterized.
       await Promise.race([document.fonts.load('700 12px "Orbitron"'), new Promise((r) => setTimeout(r, 1500))]).catch(() => undefined);
       if (cancelled) return;

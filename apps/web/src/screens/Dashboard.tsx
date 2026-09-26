@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { Avatar, StatsGrid } from "../components/CharacterCard";
 import { Page } from "../components/Layout";
 import { api } from "../lib/api";
+import { isDemo } from "../lib/demo";
 import { useApp } from "../lib/store";
 import { useAsync } from "../lib/useAsync";
 
@@ -19,9 +20,10 @@ export function Dashboard() {
 
   if (!me) return null;
   const b = me.balances;
+  const demo = isDemo();
 
   return (
-    <Page title={`Welcome back, ${me.username}`} subtitle={me.isGuest ? "Guest account — link a wallet in Settings to enable crypto features." : undefined}>
+    <Page title={`Welcome back, ${me.username}`} subtitle={demo ? "Offline demo — progress is saved in this browser. Wallets and crypto rewards are disabled." : me.isGuest ? "Guest account — link a wallet in Settings to enable crypto features." : undefined}>
       <div className="grid gap-4 lg:grid-cols-[360px_1fr_340px]">
         {/* Left: character card */}
         <Panel title="Your Hero" actions={<Button size="sm" variant="ghost" onClick={() => go("characters")}>Change</Button>}>
@@ -81,14 +83,16 @@ export function Dashboard() {
 
         {/* Right: balances */}
         <div className="flex flex-col gap-4">
-          <Panel title="Balances" actions={<Button size="sm" variant="ghost" onClick={() => go("wallet")}>Wallet →</Button>}>
+          <Panel title="Balances" actions={demo ? undefined : <Button size="sm" variant="ghost" onClick={() => go("wallet")}>Wallet →</Button>}>
             <div className="grid grid-cols-2 gap-4">
               <Stat label="Gold" value={formatInt(b.gold)} accent="#fbbf24" />
               <Stat label="Gems" value={formatInt(b.gems)} accent="#38bdf8" />
-              <Stat label={`Reward (${b.cryptoSymbol})`} value={formatToken(b.cryptoReward, b.cryptoDecimals, 3)} accent="#e879f9" />
-              <Stat label={`Deposited (${b.cryptoSymbol})`} value={formatToken(b.cryptoSpendable, b.cryptoDecimals, 3)} accent="#a3e635" />
+              {!demo && <Stat label={`Reward (${b.cryptoSymbol})`} value={formatToken(b.cryptoReward, b.cryptoDecimals, 3)} accent="#e879f9" />}
+              {!demo && <Stat label={`Deposited (${b.cryptoSymbol})`} value={formatToken(b.cryptoSpendable, b.cryptoDecimals, 3)} accent="#a3e635" />}
             </div>
-            <p className="mt-3 text-[11px] text-slate-500">Reward balance is withdrawable. Deposited balance can be spent in the shop.</p>
+            <p className="mt-3 text-[11px] text-slate-500">
+              {demo ? "Demo balances are play money and reset when you log out." : "Reward balance is withdrawable. Deposited balance can be spent in the shop."}
+            </p>
           </Panel>
           <Panel title="Quick links">
             <div className="grid grid-cols-2 gap-2">

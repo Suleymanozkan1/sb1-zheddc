@@ -1,5 +1,6 @@
 import { Button, cx, formatInt, formatToken } from "@cryptoarena/ui";
 import type { ReactNode } from "react";
+import { isDemo } from "../lib/demo";
 import { signOut } from "../lib/session";
 import { useApp, type Screen } from "../lib/store";
 
@@ -32,13 +33,19 @@ export function TopBar() {
   const { me, go, screen } = useApp();
   if (!me) return null;
   const b = me.balances;
+  const demo = isDemo();
   return (
     <header className="glass sticky top-0 z-40 m-2 flex flex-wrap items-center gap-3 rounded-2xl px-4 py-2 md:m-3">
       <button onClick={() => go("dashboard")} className="font-display text-lg font-black tracking-widest text-cyan-300 neon-text">
         CRYPTO<span className="text-fuchsia-400">ARENA</span>
       </button>
+      {demo && (
+        <span title="Offline demo: progress is stored in this browser only" className="rounded bg-amber-400/20 px-2 py-0.5 font-display text-[10px] font-bold tracking-widest text-amber-300">
+          DEMO
+        </span>
+      )}
       <nav className="order-3 flex w-full gap-1 overflow-x-auto md:order-none md:w-auto md:flex-1 md:justify-center">
-        {NAV.map((n) => (
+        {NAV.filter((n) => !demo || n.key !== "wallet").map((n) => (
           <button
             key={n.key}
             onClick={() => go(n.key)}
@@ -54,9 +61,11 @@ export function TopBar() {
       <div className="ml-auto flex items-center gap-3 text-xs">
         <span title="Gold">🪙 {formatInt(b.gold)}</span>
         <span title="Gems">💎 {formatInt(b.gems)}</span>
-        <span title="Withdrawable rewards" className="text-fuchsia-300">
-          ◎ {formatToken(b.cryptoReward, b.cryptoDecimals, 2)}
-        </span>
+        {!demo && (
+          <span title="Withdrawable rewards" className="text-fuchsia-300">
+            ◎ {formatToken(b.cryptoReward, b.cryptoDecimals, 2)}
+          </span>
+        )}
         <button onClick={() => go("settings")} className="flex items-center gap-2 rounded-lg bg-white/5 px-2 py-1 hover:bg-white/10">
           <span className="grid h-6 w-6 place-items-center rounded-full bg-gradient-to-br from-cyan-400 to-fuchsia-500 text-[10px] font-black text-black">{me.username.slice(0, 2).toUpperCase()}</span>
           <span className="hidden sm:inline">{me.username}</span>

@@ -1,5 +1,6 @@
-// Server-authoritative arena simulation. Framework-free so it can be unit tested:
-// the Colyseus room feeds it validated inputs and mirrors its entities into the synced state.
+// Authoritative arena simulation. Framework-free: the Colyseus room runs it on the server, and the
+// offline demo runs the same code in the browser.
+// The room (or demo) feeds it validated inputs and mirrors its entities into the synced state.
 //
 // Design notes (patterns adapted from colyseus/tutorial-phaser Part 4 and halftheopposite/tosios):
 //  - fixed timestep; clients send one input per fixed step, the server consumes them against a
@@ -12,43 +13,18 @@ import {
   type CombatStats,
   type PlayerMoveInput,
 } from "@cryptoarena/shared";
-import {
-  DASH_COOLDOWN_MS,
-  DynamicGrid,
-  MAX_INPUT_QUEUE,
-  NPC_POPULATION,
-  PICKUP_RADIUS,
-  PLAYER_RADIUS,
-  PROJECTILE_RADIUS,
-  RESOURCES,
-  RESOURCE_POPULATION,
-  RESPAWN_DELAY_MS,
-  Rng,
-  SPAWN_PROTECTION_MS,
-  angleDiff,
-  angleTo,
-  computeCombatStats,
-  dist2,
-  generateArena,
-  getNpcDef,
-  isValidSeq,
-  killXp,
-  levelFromXp,
-  maxTravel,
-  randomFreePoint,
-  resolveCircle,
-  rollDamage,
-  rollLoot,
-  sanitizeAngle,
-  sanitizeMove,
-  startDash,
-  stepMovement,
-  zonesAt,
-  type AbilityEffect,
-  type ArenaMap,
-  type LootCandidate,
-  type NpcDef,
-} from "@cryptoarena/game-core";
+import { DASH_COOLDOWN_MS, MAX_INPUT_QUEUE, PICKUP_RADIUS, PLAYER_RADIUS, PROJECTILE_RADIUS, RESPAWN_DELAY_MS, SPAWN_PROTECTION_MS } from "../constants";
+import { DynamicGrid, resolveCircle } from "../collision";
+import { NPC_POPULATION, RESOURCES, RESOURCE_POPULATION, getNpcDef, type NpcDef } from "../npcs";
+import { Rng } from "../rng";
+import { angleDiff, angleTo, dist2 } from "../math";
+import { computeCombatStats, rollDamage } from "../stats";
+import { generateArena, randomFreePoint, zonesAt, type ArenaMap } from "../map";
+import { isValidSeq } from "../anticheat";
+import { killXp, levelFromXp } from "../progression";
+import { maxTravel, sanitizeAngle, sanitizeMove, startDash, stepMovement } from "../movement";
+import { rollLoot, type LootCandidate } from "../items";
+import type { AbilityEffect } from "../characters";
 import type { Buff, Killer, PendingMeteor, SimEvents, SimLoot, SimNpc, SimPlayer, SimProjectile, SimResource } from "./types";
 
 export interface SimulationOptions {

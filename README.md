@@ -23,6 +23,10 @@ Tarayıcıda **http://localhost:5173** → **PLAY NOW** → *Play as Guest* (vey
 Varsayılan kurulum `SOLANA_MOCK=true` ile çalışır (gerçek token hareket etmez). Gerçek devnet için
 [Solana devnet kurulumu](#12-solana-devnet-setup) bölümüne bakın.
 
+**Çevrimdışı demo:** Sunucu gerekmeden oynamak için giriş ekranında *Try the offline demo* seçeneğini kullanın.
+Arena tarayıcıda botlara karşı çalışır, ilerleme bu cihazda saklanır; cüzdan ve kripto ödülleri kapalıdır.
+Vercel derlemesi `VITE_DEMO_ONLY` ayarlanmadıkça yalnızca demo olarak çıkar.
+
 ---
 
 ## Table of contents
@@ -227,6 +231,13 @@ pnpm --filter @cryptoarena/web build && pnpm --filter @cryptoarena/web preview
 
 The Phaser bundle is lazy-loaded when entering the arena. `VITE_GAME_URL` points to the Colyseus server.
 
+**Offline demo.** *Try the offline demo* on the landing page (or a build with `VITE_DEMO_ONLY=true`, which
+shows only the demo) runs the arena entirely in the browser: the same `ArenaSimulation` the game server
+uses (`packages/game-core/src/sim`) plus bots, behind the `ArenaLink` interface the Phaser scene consumes.
+Account, inventory, shop and quests use a local profile in `localStorage` (`apps/web/src/demo`). The demo
+never calls the API; wallets, deposits, withdrawals and crypto rewards are disabled, and its play-money
+balances have no connection to the real economy.
+
 ## 9. Running the Colyseus server
 
 ```bash
@@ -393,6 +404,8 @@ Web: http://localhost:8080 · Admin: http://localhost:8081 · API: http://localh
 * **Frontend (web/admin):** static builds (`pnpm --filter @cryptoarena/web build`) on Vercel or
   Cloudflare Pages; route `/api/*` to the API through the same domain (or set `VITE_API_URL` +
   `COOKIE_DOMAIN`) so cookies stay first-party; set `VITE_GAME_URL=wss://game.example.com`.
+  `vercel.json` builds the offline demo (`VITE_DEMO_ONLY=true`) by default; set `VITE_DEMO_ONLY=false`
+  in the Vercel project once the backend is deployed.
 * **API / game server / blockchain-service:** `docker/node.Dockerfile` images on a VPS or container
   platform behind TLS (Caddy/nginx/Traefik). Set `TRUST_PROXY_HOPS`. Run the game server with sticky
   WebSockets; for several game nodes switch Colyseus to Redis presence/driver.
