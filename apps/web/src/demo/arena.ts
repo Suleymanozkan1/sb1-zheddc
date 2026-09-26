@@ -297,7 +297,8 @@ export class DemoArena implements ArenaLink {
       if (this.assign(v, next)) this.changed(v);
     }
     for (const n of this.sim.npcs.values()) {
-      if (!n.awake) continue;
+      // Static NPCs (chests) never wake up but can still take damage, so their HP must sync.
+      if (!n.awake && n.def.behavior !== "static") continue;
       const v = this.all.npcs.get(n.id);
       if (v && this.assign(v, { x: n.x, y: n.y, aim: n.aim, hp: Math.max(0, Math.round(n.hp)) }) && this.state.npcs.has(n.id)) this.changed(v);
     }

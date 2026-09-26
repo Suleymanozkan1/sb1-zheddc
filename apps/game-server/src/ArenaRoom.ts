@@ -871,7 +871,8 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
       if (s.tint !== p.tint) s.tint = p.tint;
     }
     for (const n of this.sim.npcs.values()) {
-      if (!n.awake) continue;
+      // Static NPCs (chests) never wake up but can still take damage, so their HP must sync.
+      if (!n.awake && n.def.behavior !== "static") continue;
       const s = this.npcStates.get(n.id);
       if (!s) continue;
       if (s.x !== n.x) s.x = n.x;
