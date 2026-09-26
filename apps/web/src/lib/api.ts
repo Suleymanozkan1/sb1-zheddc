@@ -16,6 +16,8 @@ import type {
   DepositDto,
   LeaderboardScope,
 } from "@cryptoarena/shared";
+import { demoApi } from "../demo/api";
+import { isDemo } from "./demo";
 
 const BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? "";
 
@@ -77,7 +79,7 @@ async function request<T>(method: "GET" | "POST", path: string, body?: unknown, 
 
 export const newKey = (): string => crypto.randomUUID().replace(/-/g, "");
 
-export const api = {
+const serverApi = {
   me: () => request<MeDto>("GET", "/api/me"),
   profile: () => request<MeDto & { stats: Record<string, number> }>("GET", "/api/profile"),
   nonce: (address: string, purpose: "LOGIN" | "LINK_WALLET") => request<{ nonce: string; message: string }>("POST", "/api/auth/nonce", { address, purpose }),
@@ -115,3 +117,10 @@ export const api = {
 
   gameTicket: (userCharacterId: string, mode: MatchMode) => request<{ ticket: string }>("POST", "/api/game/ticket", { userCharacterId, mode }),
 };
+
+export type Api = typeof serverApi;
+
+/** The live REST API, or the in-browser demo account when demo mode is on. */
+export const api: Api = new Proxy(serverApi, {
+  get: (target, key) => Reflect.get(isDemo() ? demoApi : target, key),
+});

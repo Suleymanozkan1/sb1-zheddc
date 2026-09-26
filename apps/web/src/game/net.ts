@@ -1,4 +1,4 @@
-import { Client, type Room } from "@colyseus/sdk";
+import { Callbacks, Client, type Room } from "@colyseus/sdk";
 import { ROOM_NAMES, type ClientMessages, type MatchMode, type ServerMessages } from "@cryptoarena/shared";
 import type { ArenaStateView } from "./types";
 
@@ -6,8 +6,33 @@ const GAME_URL = (import.meta.env.VITE_GAME_URL as string | undefined) ?? `${loc
 
 type Handler<K extends keyof ServerMessages> = (msg: ServerMessages[K]) => void;
 
+export type EntityCollection = "players" | "npcs" | "projectiles" | "loot" | "resources";
+
+/** Change notifications for the synchronised arena state (Colyseus callback subset). */
+export interface StateCallbacks {
+  onAdd(prop: EntityCollection, handler: (value: unknown, key: string) => void): void;
+  onRemove(prop: EntityCollection, handler: (value: unknown, key: string) => void): void;
+  onChange(instance: unknown, handler: () => void): void;
+  listen(prop: "phase" | "phaseEndsAt", handler: (value: unknown) => void): void;
+}
+
+/** What the arena scene needs from a match: the live server room or the offline demo arena. */
+export interface ArenaLink {
+  readonly state: ArenaStateView;
+  readonly sessionId: string;
+  readonly rtt: number;
+  serverNow(): number;
+  send<K extends keyof ClientMessages>(type: K, payload: ClientMessages[K]): void;
+  on<K extends keyof ServerMessages>(type: K, handler: Handler<K>): void;
+  callbacks(): StateCallbacks;
+  /** Resolves once the first full state (map seed) is available. */
+  ready(): Promise<void>;
+  onLeave(handler: (code: number) => void): void;
+  leave(): Promise<void>;
+}
+
 /** Thin typed wrapper around a Colyseus room plus clock synchronisation. */
-export class GameConnection {
+export class GameConnection implements ArenaLink {
   readonly room: Room<unknown, ArenaStateView>;
   /** serverTime ≈ performance.now() + offset */
   private offset = 0;
@@ -46,6 +71,21 @@ export class GameConnection {
 
   get state(): ArenaStateView {
     return this.room.state;
+  }
+
+  callbacks(): StateCallbacks {
+    return Callbacks.get(this.room as unknown as Parameters<typeof Callbacks.get>[0]) as unknown as StateCallbacks;
+  }
+
+  ready(): Promise<void> {
+    return new Promise<void>((resolve) => {
+      if (this.state?.mapSeed) return resolve();
+      this.room.onStateChange.once(() => resolve());
+    });
+  }
+
+  onLeave(handler: (code: number) => void): void {
+    this.room.onLeave(handler);
   }
 
   get sessionId(): string {

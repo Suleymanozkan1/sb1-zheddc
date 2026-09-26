@@ -1,4 +1,7 @@
-import type { CharacterBase, CharacterDef, EquippedItemInput, MoverState, NpcDef, ResourceDef } from "@cryptoarena/game-core";
+import type { CharacterBase, CharacterDef } from "../characters";
+import type { MoverState } from "../movement";
+import type { NpcDef, ResourceDef } from "../npcs";
+import type { EquippedItemInput } from "../stats";
 import type { CombatStats, PlayerMoveInput, Rarity, StatKey } from "@cryptoarena/shared";
 
 export interface Buff {

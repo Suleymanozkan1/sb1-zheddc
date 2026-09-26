@@ -3,7 +3,8 @@
 // validation as real clients, so they double as a load/regression test.
 
 import { Buttons } from "@cryptoarena/shared";
-import { CHARACTERS, angleTo, dist2, getCharacterDef, type CharacterDef } from "@cryptoarena/game-core";
+import { CHARACTERS, getCharacterDef, type CharacterDef } from "../characters";
+import { angleTo, dist2 } from "../math";
 import type { ArenaSimulation } from "./simulation";
 import type { SimPlayer } from "./types";
 

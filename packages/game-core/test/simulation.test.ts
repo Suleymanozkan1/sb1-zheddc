@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Buttons } from "@cryptoarena/shared";
-import { getCharacterDef, getNpcDef, maxTravel, type CharacterDef } from "@cryptoarena/game-core";
+import { getCharacterDef, getNpcDef, maxTravel, type CharacterDef } from "../src/index";
 import { ArenaSimulation } from "../src/sim/simulation";
 import type { SimEvents, SimPlayer } from "../src/sim/types";
 

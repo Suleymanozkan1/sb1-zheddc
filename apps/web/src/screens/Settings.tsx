@@ -2,6 +2,7 @@ import { Button, Panel, shortAddress } from "@cryptoarena/ui";
 import { Page } from "../components/Layout";
 import { signOut } from "../lib/session";
 import { useApp } from "../lib/store";
+import { isDemo } from "../lib/demo";
 import { useWalletAuth } from "../wallet/useWalletAuth";
 
 export function Settings() {
@@ -22,7 +23,7 @@ export function Settings() {
             <dt className="text-slate-400">Username</dt>
             <dd>{me.username}</dd>
             <dt className="text-slate-400">Account type</dt>
-            <dd>{me.isGuest ? "Guest" : "Wallet"}</dd>
+            <dd>{isDemo() ? "Offline demo" : me.isGuest ? "Guest" : "Wallet"}</dd>
             <dt className="text-slate-400">Premium</dt>
             <dd>{me.premiumTier}{me.premiumUntil ? ` until ${new Date(me.premiumUntil).toLocaleDateString()}` : ""}</dd>
             <dt className="text-slate-400">Wallets</dt>
@@ -35,9 +36,11 @@ export function Settings() {
             )}
           </dl>
           <div className="mt-4 flex flex-wrap gap-2">
-            <Button variant="primary" loading={busy} onClick={() => void linkWallet()}>
-              {me.wallets.length ? "Link another wallet" : "Link wallet"}
-            </Button>
+            {!isDemo() && (
+              <Button variant="primary" loading={busy} onClick={() => void linkWallet()}>
+                {me.wallets.length ? "Link another wallet" : "Link wallet"}
+              </Button>
+            )}
             <Button
               variant="danger"
               onClick={() => void signOut()}

@@ -2,7 +2,6 @@
 // (same deterministic step as the server) and reconciles against server acknowledgements.
 // Remote entities are interpolated ~100 ms in the past for smooth motion.
 
-import { Callbacks } from "@colyseus/sdk";
 import {
   CHARACTERS,
   DASH_COOLDOWN_MS,
@@ -23,7 +22,7 @@ import Phaser from "phaser";
 import { useApp } from "../lib/store";
 import { useHud, type MinimapDot } from "./hud";
 import { KeyboardMouseInput, TouchInput, isTouchDevice, type InputSource } from "./input";
-import type { GameConnection } from "./net";
+import type { ArenaLink } from "./net";
 import { generateTextures } from "./textures";
 import { heroTextureKey, generateHeroTextures } from "./art/characters";
 import { CREATURE_BODY_RADIUS, creatureTextureKey, generateCreatureTextures } from "./art/creatures";
@@ -81,7 +80,7 @@ function colorOf(cls: string): number {
 }
 
 export class ArenaScene extends Phaser.Scene {
-  private conn!: GameConnection;
+  private conn!: ArenaLink;
   private map!: ArenaMap;
   private input_!: InputSource;
   private touch: TouchInput | null = null;
@@ -114,7 +113,7 @@ export class ArenaScene extends Phaser.Scene {
     super({ key: "arena" });
   }
 
-  init(data: { conn: GameConnection; touch?: (t: TouchInput | null) => void }): void {
+  init(data: { conn: ArenaLink; touch?: (t: TouchInput | null) => void }): void {
     this.conn = data.conn;
     this.registry.set("touchCb", data.touch);
   }
@@ -335,13 +334,7 @@ export class ArenaScene extends Phaser.Scene {
   }
 
   private bindState(): void {
-    const room = this.conn.room;
-    const cb = Callbacks.get(room as unknown as Parameters<typeof Callbacks.get>[0]) as unknown as {
-      onAdd: (prop: string, h: (v: unknown, k: string) => void) => void;
-      onRemove: (prop: string, h: (v: unknown, k: string) => void) => void;
-      onChange: (inst: unknown, h: () => void) => void;
-      listen: (prop: string, h: (v: unknown) => void) => void;
-    };
+    const cb = this.conn.callbacks();
     const me = this.conn.sessionId;
 
     cb.onAdd("players", (raw, id) => {

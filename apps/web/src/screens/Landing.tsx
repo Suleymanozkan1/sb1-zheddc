@@ -1,6 +1,7 @@
 import { Button, Modal } from "@cryptoarena/ui";
 import { useState } from "react";
 import { api } from "../lib/api";
+import { DEMO_ONLY, setDemo } from "../lib/demo";
 import { errorMessage, useApp } from "../lib/store";
 import { useWalletAuth } from "../wallet/useWalletAuth";
 
@@ -9,6 +10,17 @@ export function Landing() {
   const { signIn, busy } = useWalletAuth();
   const [open, setOpen] = useState(false);
   const [guestBusy, setGuestBusy] = useState(false);
+
+  const startDemo = async () => {
+    setDemo(true);
+    try {
+      setMe(await api.guest());
+      go("dashboard");
+    } catch (err) {
+      setDemo(false);
+      toast("error", errorMessage(err));
+    }
+  };
 
   return (
     <div className="grid-bg relative flex min-h-full flex-col items-center justify-center overflow-hidden px-4 py-16 text-center">
@@ -22,9 +34,14 @@ export function Landing() {
         Pick a hero, drop into a 10,000×10,000 neon battlefield, farm resources, slay creatures and outplay rivals. Earn gear, climb seasonal leaderboards and win
         performance-based rewards.
       </p>
-      <Button variant="primary" size="xl" className="mt-10 font-display" onClick={() => setOpen(true)}>
-        PLAY NOW
+      <Button variant="primary" size="xl" className="mt-10 font-display" onClick={() => (DEMO_ONLY ? void startDemo() : setOpen(true))}>
+        {DEMO_ONLY ? "PLAY DEMO" : "PLAY NOW"}
       </Button>
+      {DEMO_ONLY && (
+        <p className="mt-3 max-w-md text-xs text-slate-400">
+          Offline demo: the arena runs in your browser against bots. Progress is saved on this device; wallets and crypto rewards are disabled.
+        </p>
+      )}
       <div className="mt-12 grid max-w-4xl gap-4 text-left sm:grid-cols-3">
         {[
           ["⚔️ Skill first", "Server-authoritative combat: aim, dodge, dash. No pay-to-win damage numbers from the client."],
@@ -64,7 +81,13 @@ export function Landing() {
           >
             Play as Guest
           </Button>
-          <p className="text-xs text-slate-400">Guests keep their progress on this device and can link a wallet later to unlock deposits, crypto rewards and withdrawals.</p>
+          <Button size="lg" variant="ghost" onClick={() => void startDemo()}>
+            Try the offline demo
+          </Button>
+          <p className="text-xs text-slate-400">
+            Guests keep their progress on this device and can link a wallet later to unlock deposits, crypto rewards and withdrawals. The offline demo runs entirely in
+            your browser against bots, without an account.
+          </p>
         </div>
       </Modal>
     </div>
