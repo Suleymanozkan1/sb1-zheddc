@@ -700,6 +700,9 @@ export class ArenaScene extends Phaser.Scene {
       const amount = Number(BigInt(m.amount)) / 10 ** d;
       useHud.getState().pushNotice(`+${amount.toFixed(3)} ${sym} (${m.source.toLowerCase()})`, "#e879f9");
     });
+    this.conn.on("notice", (m) => {
+      if (/^Inventory (is )?full/.test(m.message)) useHud.getState().set({ inventoryFullUntil: performance.now() + 15_000 });
+    });
     this.conn.on("notice", (m) => useHud.getState().pushNotice(t(m.message), m.level === "error" ? "#f87171" : m.level === "warn" ? "#fbbf24" : "#7dd3fc"));
     this.conn.on("match_start", () => useHud.getState().pushNotice(t("MATCH STARTED — FIGHT!"), "#f43f5e"));
     this.conn.on("match_end", (m) => useHud.getState().set({ standings: m.standings }));

@@ -533,7 +533,7 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
         })
         .catch((err: unknown) => {
           this.sim.releasePickup(loot.id);
-          if (err instanceof AppError && err.code === "INVENTORY_FULL") this.notice(client, "warn", "Inventory full — upgrade or sell items first");
+          if (err instanceof AppError && err.code === "INVENTORY_FULL") this.notice(client, "warn", "Inventory full — sell items or move them to the stash");
           else this.deps.logger.error({ err }, "loot pickup failed");
         })
         .finally(() => {

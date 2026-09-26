@@ -35,8 +35,18 @@ export const DEMO_PRODUCTS: readonly DemoProduct[] = [
   { sku: "equip_vest_epic", name: "Quantum Vest", description: "Epic body armor.", category: "EQUIPMENT", price: 700, currency: "GEMS", rarity: "EPIC", grants: item("vest_epic") },
   { sku: "potion_pack_5", name: "Health Potions x5", description: "Five health potions.", category: "CONSUMABLE", price: 150, currency: "GOLD", rarity: "COMMON", grants: item("potion_health", 5) },
   { sku: "boost_xp_1", name: "XP Booster", description: "+50% XP for 30 minutes of play.", category: "BOOST", price: 120, currency: "GEMS", rarity: "RARE", grants: item("boost_xp") },
+  { sku: "stash_20", name: "+20 Stash Slots", description: "Permanently expands your stash.", category: "COSMETIC", price: 2_000, currency: "GOLD", rarity: "UNCOMMON", grants: [{ kind: "STASH_SLOTS", amount: 20 }], perUserLimit: 10 },
   { sku: "slots_20", name: "+20 Inventory Slots", description: "Permanently expands your inventory.", category: "COSMETIC", price: 200, currency: "GEMS", rarity: "UNCOMMON", grants: [{ kind: "INVENTORY_SLOTS", amount: 20 }], perUserLimit: 5 },
 ];
+
+/** Sell prices, mirroring the live defaults (SELL_* in the server config). */
+export const DEMO_SELL_RATES = {
+  gold: { COMMON: 12, UNCOMMON: 30, RARE: 80, EPIC: 200, LEGENDARY: 500, MYTHIC: 1200 },
+  consumableBps: 2_500,
+  upgradeRefundBps: 2_500,
+} as const;
+export const DEMO_STASH_SLOTS = 100;
+export const DEMO_SELL_MAX_ITEMS = 100;
 
 export type DemoObjective = "KILL_NPC" | "KILL_PLAYER" | "COLLECT_RESOURCE" | "PLAY_MATCH";
 

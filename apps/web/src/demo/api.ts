@@ -4,7 +4,7 @@ import { getCharacterDef, itemUpgradeCost } from "@cryptoarena/game-core";
 import { StatKey, type LeaderboardDto, type LeaderboardRowDto, type LeaderboardScope, type QuestDto, type ShopProductDto } from "@cryptoarena/shared";
 import type { Api } from "../lib/api";
 import { setDemo } from "../lib/demo";
-import { DEMO_PRODUCTS, DEMO_QUESTS, DEMO_RIVALS } from "./catalog";
+import { DEMO_PRODUCTS, DEMO_QUESTS, DEMO_RIVALS, DEMO_SELL_MAX_ITEMS } from "./catalog";
 import {
   DemoError,
   balancesOf,
@@ -20,7 +20,10 @@ import {
   meOf,
   requireProfile,
   saveProfile,
+  sellValueOf,
   slotFor,
+  stashSlotsOf,
+  usedSlots,
   spend,
   unlockCharacter,
   type DemoProfile,
@@ -63,6 +66,7 @@ function buy(p: DemoProfile, sku: string): void {
     if (g.kind === "ITEM") grantItem(p, g.itemKey, g.quantity);
     else if (g.kind === "CHARACTER") unlockCharacter(p, g.characterKey);
     else if (g.kind === "INVENTORY_SLOTS") p.slots += g.amount;
+    else if (g.kind === "STASH_SLOTS") p.stashSlots = stashSlotsOf(p) + g.amount;
     else if (g.kind === "GOLD") p.gold += g.amount;
     else if (g.kind === "GEMS") p.gems += g.amount;
   }
@@ -136,7 +140,55 @@ export const demoApi: Api = {
       return { characters: charactersOf(p), balances: balancesOf(p) };
     }),
 
-  inventory: () => read((p) => ({ slots: p.slots, items: p.inventory.map(inventoryRowDto) })),
+  inventory: () => read((p) => ({ slots: p.slots, stashSlots: stashSlotsOf(p), items: p.inventory.map(inventoryRowDto) })),
+  sellItems: (inventoryItemIds) =>
+    mutate((p) => {
+      const ids = [...new Set(inventoryItemIds)];
+      if (ids.length === 0) throw new DemoError("Nothing to sell");
+      if (ids.length > DEMO_SELL_MAX_ITEMS) throw new DemoError(`You can sell at most ${DEMO_SELL_MAX_ITEMS} items at once`);
+      let gold = 0;
+      for (const id of ids) {
+        const row = p.inventory.find((r) => r.id === id);
+        if (!row) throw new DemoError("Item not found in your inventory");
+        const name = itemDef(row.itemKey).name;
+        if (row.locked) throw new DemoError(`${name} is locked`);
+        if (row.equipped) throw new DemoError(`Unequip ${name} before selling it`);
+        const value = sellValueOf(row);
+        if (value === null) throw new DemoError(`${name} cannot be sold`);
+        gold += value;
+      }
+      p.inventory = p.inventory.filter((r) => !ids.includes(r.id));
+      p.gold += gold;
+      return { sold: ids.length, gold: String(gold), balances: balancesOf(p) };
+    }),
+  lockItem: (inventoryItemId, locked) =>
+    mutate((p) => {
+      const row = p.inventory.find((r) => r.id === inventoryItemId);
+      if (!row) throw new DemoError("Item not found in your inventory");
+      row.locked = locked;
+      return { ok: true };
+    }),
+  moveItem: (inventoryItemId, to) =>
+    mutate((p) => {
+      const row = p.inventory.find((r) => r.id === inventoryItemId);
+      if (!row) throw new DemoError("Item not found in your inventory");
+      const toStash = to === "stash";
+      if (!!row.inStash === toStash) return { ok: true };
+      if (row.equipped) throw new DemoError("Unequip the item before storing it");
+      const def = itemDef(row.itemKey);
+      // A stack joins an existing stack at the destination without using a new slot.
+      const target = def.stackable ? p.inventory.find((r) => r.itemKey === row.itemKey && !!r.inStash === toStash) : undefined;
+      if (target) {
+        target.quantity = Math.min(def.maxStack, target.quantity + row.quantity);
+        target.locked = !!target.locked || !!row.locked;
+        p.inventory = p.inventory.filter((r) => r !== row);
+        return { ok: true };
+      }
+      const capacity = toStash ? stashSlotsOf(p) : p.slots;
+      if (usedSlots(p, toStash) >= capacity) throw new DemoError(toStash ? "Stash is full" : "Inventory is full");
+      row.inStash = toStash;
+      return { ok: true };
+    }),
   equip: (inventoryItemId) =>
     mutate((p) => {
       const row = p.inventory.find((r) => r.id === inventoryItemId);
@@ -144,6 +196,7 @@ export const demoApi: Api = {
       const def = itemDef(row.itemKey);
       const slot = slotFor(def);
       if (!slot) throw new DemoError("This item cannot be equipped");
+      if (row.inStash) throw new DemoError("Take the item out of the stash first");
       if (def.levelRequirement > maxCharacterLevel(p)) throw new DemoError(`Requires level ${def.levelRequirement}`);
       for (const r of p.inventory) {
         if (r.equipped && r.equippedSlot === slot) {

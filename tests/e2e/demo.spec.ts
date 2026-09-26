@@ -92,3 +92,32 @@ test("language switch: the interface can be shown in Turkish", async ({ page }) 
   await expect(page.getByText("Welcome back")).toBeVisible();
   await page.getByRole("button", { name: "Logout" }).click();
 });
+
+test("offline demo: sell, lock and stash items", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "PLAY NOW" }).click();
+  await page.getByRole("button", { name: "Try the offline demo" }).click();
+  await page.getByRole("button", { name: "Shop", exact: true }).first().click();
+  await page.locator("section", { hasText: "Neon Blade" }).getByRole("button").click();
+  await expect(page.getByText("Purchased Neon Blade")).toBeVisible();
+  await page.getByRole("button", { name: "Inventory", exact: true }).first().click();
+
+  const blade = page.locator(".glass", { hasText: "Neon Blade" }).first();
+  // Locked items cannot be sold.
+  await blade.getByRole("button", { name: "Lock" }).click();
+  await expect(blade.getByRole("button", { name: /^Sell/ })).toBeDisabled();
+  await blade.getByRole("button", { name: "Unlock" }).click();
+
+  // Store it in the stash, then take it back out.
+  await blade.getByRole("button", { name: /Store/ }).click();
+  await expect(page.getByText("Neon Blade moved to the stash")).toBeVisible();
+  await page.getByRole("button", { name: /Stash \(1\)/ }).click();
+  await page.locator(".glass", { hasText: "Neon Blade" }).first().getByRole("button", { name: /Take out/ }).click();
+  await page.getByRole("button", { name: /Inventory \(/ }).click();
+
+  // Rare items ask for confirmation before selling.
+  await page.locator(".glass", { hasText: "Neon Blade" }).first().getByRole("button", { name: /^Sell/ }).click();
+  await page.getByRole("dialog").getByRole("button", { name: /Sell for 80 gold/ }).click();
+  await expect(page.getByText("Sold Neon Blade for 80 gold")).toBeVisible();
+  await expect(page.locator(".glass", { hasText: "Neon Blade" })).toHaveCount(0);
+});

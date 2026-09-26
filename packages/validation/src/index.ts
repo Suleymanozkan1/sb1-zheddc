@@ -30,6 +30,9 @@ export const withdrawCancelRequest = z.object({ withdrawalId: uuid });
 
 export const inventoryItemRequest = z.object({ inventoryItemId: uuid });
 export const itemUpgradeRequest = z.object({ inventoryItemId: uuid, idempotencyKey });
+export const itemSellRequest = z.object({ inventoryItemIds: z.array(uuid).min(1).max(500), idempotencyKey });
+export const itemLockRequest = z.object({ inventoryItemId: uuid, locked: z.boolean() });
+export const itemMoveRequest = z.object({ inventoryItemId: uuid, to: z.enum(["inventory", "stash"]) });
 export const purchaseRequest = z.object({ sku: z.string().trim().min(1).max(64).regex(/^[a-z0-9_]+$/), quantity: z.number().int().min(1).max(100).default(1), idempotencyKey });
 export const characterUnlockRequest = z.object({ characterKey: slug, sku: z.string().trim().max(64).regex(/^[a-z0-9_]+$/).optional(), idempotencyKey });
 export const characterUpgradeRequest = z.object({ userCharacterId: uuid, stat: z.enum(StatKey), idempotencyKey });

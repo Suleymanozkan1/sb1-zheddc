@@ -43,6 +43,8 @@ export interface HudState {
   region: string;
   regionKey: string;
   nearLoot: boolean;
+  /** Set when a pickup failed because the inventory is full (performance.now() deadline). */
+  inventoryFullUntil: number;
   selfName: string;
   selfClass: string;
   selfColor: number;
@@ -86,6 +88,7 @@ const initial = {
   region: "",
   regionKey: "",
   nearLoot: false,
+  inventoryFullUntil: 0,
   selfName: "",
   selfClass: "",
   selfColor: 0x22d3ee,

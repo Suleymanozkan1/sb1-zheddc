@@ -179,6 +179,7 @@ All values live in `.env` (copy of [`.env.example`](.env.example)); every variab
 | `PVP_REWARD_MIN_VICTIM_LEVEL`, `PVP_REPEAT_DECAY_BPS` | 5, 5000 | PvP crypto only for non-guest victims ≥ level 5; repeat kills of the same victim halve per day |
 | `RANKED_REWARD_BASE`, `RANKED_REWARD_MIN_HUMANS`, `RANKED_REWARD_FULL_HUMANS` | 2 tokens, 6, 12 | Ranked top-3 crypto needs ≥ 6 real players (50 % → 100 % at 12) |
 | `TITAN_REWARD_BASE`, `TITAN_MIN_DAMAGE_SHARE_BPS`, `TITAN_REWARDS_PER_USER_DAY` | 5 tokens, 500, 3 | World boss reward split by damage share (≥ 5 %), max 3 per user per day |
+| `SELL_GOLD_<RARITY>`, `SELL_CONSUMABLE_BPS`, `SELL_UPGRADE_REFUND_BPS`, `SELL_MAX_ITEMS` | 12/30/80/200/500/1200, 2500, 2500, 100 | Gold paid for selling items (skins and locked/equipped items cannot be sold) |
 | `BLOCKED_COUNTRIES`, `MIN_AGE`, `REQUIRE_KYC_FOR_WITHDRAWAL`, `GEO_COUNTRY_HEADER` | — | Compliance hooks |
 | `VITE_API_URL`, `VITE_GAME_URL`, `VITE_SOLANA_NETWORK`, `VITE_SOLANA_RPC_URL` | | Browser build-time values (never secrets) |
 

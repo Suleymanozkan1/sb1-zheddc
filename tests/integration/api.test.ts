@@ -83,6 +83,34 @@ describe("REST API", () => {
     expect(res.json()).toMatchObject({ error: { code: "BAD_REQUEST" } });
   });
 
+  it("sells, locks and stashes inventory items through the API", async () => {
+    const { header, csrf } = cookies(await app.inject({ method: "POST", url: "/api/auth/guest", payload: {} }));
+    const h = { cookie: header, "x-csrf-token": csrf };
+    const bought = await app.inject({ method: "POST", url: "/api/shop/purchase", headers: h, payload: { sku: "potion_pack_5", idempotencyKey: "sellflow01" } });
+    expect(bought.statusCode).toBe(200);
+    type Inv = { slots: number; stashSlots: number; items: { id: string; locked: boolean; inStash: boolean; sellValue: string | null; quantity: number }[] };
+    const inv = (await app.inject({ method: "GET", url: "/api/inventory", headers: { cookie: header } })).json<Inv>();
+    expect(inv.stashSlots).toBeGreaterThan(0);
+    const potions = inv.items[0]!;
+    expect(potions.sellValue).not.toBeNull();
+
+    // Locked items cannot be sold; stashing and taking out work.
+    expect((await app.inject({ method: "POST", url: "/api/inventory/lock", headers: h, payload: { inventoryItemId: potions.id, locked: true } })).statusCode).toBe(200);
+    const refused = await app.inject({ method: "POST", url: "/api/inventory/sell", headers: h, payload: { inventoryItemIds: [potions.id], idempotencyKey: "sellflow02" } });
+    expect(refused.statusCode).toBe(403);
+    expect((await app.inject({ method: "POST", url: "/api/inventory/move", headers: h, payload: { inventoryItemId: potions.id, to: "stash" } })).statusCode).toBe(200);
+    const stashed = (await app.inject({ method: "GET", url: "/api/inventory", headers: { cookie: header } })).json<Inv>();
+    expect(stashed.items.every((i) => i.inStash)).toBe(true);
+    await app.inject({ method: "POST", url: "/api/inventory/lock", headers: h, payload: { inventoryItemId: potions.id, locked: false } });
+
+    const sold = await app.inject({ method: "POST", url: "/api/inventory/sell", headers: h, payload: { inventoryItemIds: [potions.id], idempotencyKey: "sellflow03" } });
+    expect(sold.statusCode).toBe(200);
+    expect(sold.json()).toMatchObject({ sold: 1, gold: potions.sellValue });
+    // Invalid bodies are rejected by the schema.
+    const bad = await app.inject({ method: "POST", url: "/api/inventory/sell", headers: h, payload: { inventoryItemIds: [], idempotencyKey: "x" } });
+    expect(bad.statusCode).toBe(400);
+  });
+
   it("forbids admin endpoints for regular users and allows them for admins (unauthorized admin)", async () => {
     const login = await app.inject({ method: "POST", url: "/api/auth/guest", payload: {} });
     const { header, csrf } = cookies(login);

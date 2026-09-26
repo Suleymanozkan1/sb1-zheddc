@@ -8,9 +8,13 @@ import {
   listInventory,
   listQuests,
   listShop,
+  moveItem,
   parseProductMetadata,
   purchaseProduct,
   requireFeature,
+  sellItems,
+  sellRatesOf,
+  setItemLocked,
   unequipItem,
   upgradeCharacterStat,
   upgradeItem,
@@ -20,6 +24,9 @@ import {
   characterUpgradeRequest,
   gameTicketRequest,
   inventoryItemRequest,
+  itemLockRequest,
+  itemMoveRequest,
+  itemSellRequest,
   itemUpgradeRequest,
   leaderboardQuery,
   purchaseRequest,
@@ -36,8 +43,29 @@ export async function registerGameRoutes(app: FastifyInstance, ctx: ApiContext):
   // Inventory
   app.get("/api/inventory", async (req) => {
     const user = requireUser(req);
-    const u = await ctx.prisma.user.findUniqueOrThrow({ where: { id: user.id }, select: { inventorySlots: true } });
-    return { slots: u.inventorySlots, items: await listInventory(ctx.prisma, user.id) };
+    const u = await ctx.prisma.user.findUniqueOrThrow({ where: { id: user.id }, select: { inventorySlots: true, stashSlots: true } });
+    return { slots: u.inventorySlots, stashSlots: u.stashSlots, items: await listInventory(ctx.prisma, user.id, sellRatesOf(ctx.config)) };
+  });
+
+  app.post("/api/inventory/sell", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (req) => {
+    const user = requireUser(req);
+    const body = parseBody(itemSellRequest, req);
+    const res = await withTransaction(ctx.prisma, (tx) => sellItems(tx, ctx.config, { userId: user.id, inventoryItemIds: body.inventoryItemIds, idempotencyKey: body.idempotencyKey }));
+    return { sold: res.sold, gold: res.gold.toString(), duplicate: res.duplicate, balances: await buildBalances(ctx, user.id) };
+  });
+
+  app.post("/api/inventory/lock", async (req) => {
+    const user = requireUser(req);
+    const body = parseBody(itemLockRequest, req);
+    await withTransaction(ctx.prisma, (tx) => setItemLocked(tx, user.id, body.inventoryItemId, body.locked));
+    return { ok: true };
+  });
+
+  app.post("/api/inventory/move", async (req) => {
+    const user = requireUser(req);
+    const body = parseBody(itemMoveRequest, req);
+    await withTransaction(ctx.prisma, (tx) => moveItem(tx, user.id, body.inventoryItemId, body.to === "stash"));
+    return { ok: true };
   });
 
   app.post("/api/inventory/equip", async (req) => {

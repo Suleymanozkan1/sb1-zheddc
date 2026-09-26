@@ -6,6 +6,7 @@ import {
   buildItemCatalog,
   computeCombatStats,
   getCharacterDef,
+  itemSellValue,
   itemUpgradeCost,
   levelFromXp,
   levelProgress,
@@ -16,7 +17,7 @@ import {
   type ItemDef,
 } from "@cryptoarena/game-core";
 import { EquipSlots, StatKey, type BalancesDto, type CharacterDto, type InventoryItemDto, type MeDto } from "@cryptoarena/shared";
-import { DEMO_PRODUCTS, DEMO_QUESTS, DEMO_START, type DemoObjective } from "./catalog";
+import { DEMO_PRODUCTS, DEMO_QUESTS, DEMO_SELL_RATES, DEMO_STASH_SLOTS, DEMO_START, type DemoObjective } from "./catalog";
 
 interface DemoCharacter {
   id: string;
@@ -34,6 +35,8 @@ interface DemoInventoryRow {
   equipped: boolean;
   equippedSlot: string | null;
   acquiredAt: string;
+  locked?: boolean;
+  inStash?: boolean;
 }
 
 export interface DemoProfile {
@@ -44,6 +47,8 @@ export interface DemoProfile {
   gold: number;
   gems: number;
   slots: number;
+  /** Absent on profiles created before the stash existed (defaults to DEMO_STASH_SLOTS). */
+  stashSlots?: number;
   characters: Record<string, DemoCharacter>;
   inventory: DemoInventoryRow[];
   purchases: Record<string, number>;
@@ -209,9 +214,17 @@ export function charactersOf(p: DemoProfile): CharacterDto[] {
   });
 }
 
+/** Gold paid for selling this row now, or null when it cannot be sold. */
+export function sellValueOf(r: DemoInventoryRow): number | null {
+  const def = itemDef(r.itemKey);
+  if (def.type === "SKIN" || r.equipped) return null;
+  return Number(itemSellValue(DEMO_SELL_RATES, def.rarity, def.type === "CONSUMABLE", r.upgradeLevel, r.quantity));
+}
+
 export function inventoryRowDto(r: DemoInventoryRow): InventoryItemDto {
   const def = itemDef(r.itemKey);
   const cost = def.maxUpgrade > r.upgradeLevel ? itemUpgradeCost(def.rarity, r.upgradeLevel) : null;
+  const sell = sellValueOf(r);
   return {
     id: r.id,
     item: { key: def.key, name: def.name, description: def.description, type: def.type, rarity: def.rarity, stats: def.stats, stackable: def.stackable, maxUpgrade: def.maxUpgrade, levelRequirement: def.levelRequirement },
@@ -219,6 +232,9 @@ export function inventoryRowDto(r: DemoInventoryRow): InventoryItemDto {
     upgradeLevel: r.upgradeLevel,
     equipped: r.equipped,
     equippedSlot: r.equippedSlot,
+    locked: !!r.locked,
+    inStash: !!r.inStash,
+    sellValue: sell === null ? null : String(sell),
     effectiveStats: scaleItemStats(def.stats, r.upgradeLevel),
     nextUpgradeCost: cost === null ? null : cost.toString(),
     acquiredAt: r.acquiredAt,
@@ -227,15 +243,20 @@ export function inventoryRowDto(r: DemoInventoryRow): InventoryItemDto {
 
 // ───────────────────────── Mutations ─────────────────────────
 
-function usedSlots(p: DemoProfile): number {
-  return p.inventory.filter((r) => !itemDef(r.itemKey).stackable).length + new Set(p.inventory.filter((r) => itemDef(r.itemKey).stackable).map((r) => r.itemKey)).size;
+export function usedSlots(p: DemoProfile, inStash = false): number {
+  const rows = p.inventory.filter((r) => !!r.inStash === inStash);
+  return rows.filter((r) => !itemDef(r.itemKey).stackable).length + new Set(rows.filter((r) => itemDef(r.itemKey).stackable).map((r) => r.itemKey)).size;
+}
+
+export function stashSlotsOf(p: DemoProfile): number {
+  return p.stashSlots ?? DEMO_STASH_SLOTS;
 }
 
 /** Adds an item; returns the row. Throws when a new slot is needed and the inventory is full. */
 export function grantItem(p: DemoProfile, itemKey: string, quantity: number): DemoInventoryRow {
   const def = itemDef(itemKey);
   if (def.stackable) {
-    const row = p.inventory.find((r) => r.itemKey === itemKey);
+    const row = p.inventory.find((r) => r.itemKey === itemKey && !r.inStash);
     if (row) {
       row.quantity = Math.min(def.maxStack, row.quantity + quantity);
       return row;
@@ -248,7 +269,7 @@ export function grantItem(p: DemoProfile, itemKey: string, quantity: number): De
 }
 
 export function consumeItem(p: DemoProfile, itemKey: string): boolean {
-  const row = p.inventory.find((r) => r.itemKey === itemKey && r.quantity > 0);
+  const row = p.inventory.find((r) => r.itemKey === itemKey && r.quantity > 0 && !r.inStash);
   if (!row) return false;
   row.quantity--;
   if (row.quantity <= 0) p.inventory = p.inventory.filter((r) => r !== row);
@@ -256,7 +277,7 @@ export function consumeItem(p: DemoProfile, itemKey: string): boolean {
 }
 
 export function countItem(p: DemoProfile, itemKey: string): number {
-  return p.inventory.filter((r) => r.itemKey === itemKey).reduce((n, r) => n + r.quantity, 0);
+  return p.inventory.filter((r) => r.itemKey === itemKey && !r.inStash).reduce((n, r) => n + r.quantity, 0);
 }
 
 export function spend(p: DemoProfile, currency: "GOLD" | "GEMS", amount: number): void {
