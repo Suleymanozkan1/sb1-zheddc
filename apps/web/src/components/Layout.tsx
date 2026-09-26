@@ -44,7 +44,7 @@ export function TopBar() {
           DEMO
         </span>
       )}
-      <nav className="order-3 flex w-full gap-1 overflow-x-auto md:order-none md:w-auto md:flex-1 md:justify-center">
+      <nav className="order-3 flex w-full gap-1 overflow-x-auto xl:order-none xl:w-auto xl:flex-1 xl:justify-center">
         {NAV.filter((n) => !demo || n.key !== "wallet").map((n) => (
           <button
             key={n.key}
