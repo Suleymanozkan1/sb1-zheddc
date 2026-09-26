@@ -1,6 +1,8 @@
 import { Button, cx, formatInt, formatToken } from "@cryptoarena/ui";
 import type { ReactNode } from "react";
 import { isDemo } from "../lib/demo";
+import { useT } from "../lib/i18n";
+import { LanguageSwitch } from "./LanguageSwitch";
 import { signOut } from "../lib/session";
 import { useApp, type Screen } from "../lib/store";
 
@@ -31,6 +33,7 @@ export function Toasts() {
 
 export function TopBar() {
   const { me, go, screen } = useApp();
+  const t = useT();
   if (!me) return null;
   const b = me.balances;
   const demo = isDemo();
@@ -40,7 +43,7 @@ export function TopBar() {
         CRYPTO<span className="text-fuchsia-400">ARENA</span>
       </button>
       {demo && (
-        <span title="Offline demo: progress is stored in this browser only" className="rounded bg-amber-400/20 px-2 py-0.5 font-display text-[10px] font-bold tracking-widest text-amber-300">
+        <span title={t("Offline demo: progress is stored in this browser only")} className="rounded bg-amber-400/20 px-2 py-0.5 font-display text-[10px] font-bold tracking-widest text-amber-300">
           DEMO
         </span>
       )}
@@ -54,18 +57,19 @@ export function TopBar() {
               screen === n.key ? "bg-cyan-400/15 text-cyan-200" : "text-slate-400 hover:text-white",
             )}
           >
-            {n.label}
+            {t(n.label)}
           </button>
         ))}
       </nav>
       <div className="ml-auto flex items-center gap-3 text-xs">
-        <span title="Gold">🪙 {formatInt(b.gold)}</span>
-        <span title="Gems">💎 {formatInt(b.gems)}</span>
+        <span title={t("Gold")}>🪙 {formatInt(b.gold)}</span>
+        <span title={t("Gems")}>💎 {formatInt(b.gems)}</span>
         {!demo && (
-          <span title="Withdrawable rewards" className="text-fuchsia-300">
+          <span title={t("Withdrawable rewards")} className="text-fuchsia-300">
             ◎ {formatToken(b.cryptoReward, b.cryptoDecimals, 2)}
           </span>
         )}
+        <LanguageSwitch />
         <button onClick={() => go("settings")} className="flex items-center gap-2 rounded-lg bg-white/5 px-2 py-1 hover:bg-white/10">
           <span className="grid h-6 w-6 place-items-center rounded-full bg-gradient-to-br from-cyan-400 to-fuchsia-500 text-[10px] font-black text-black">{me.username.slice(0, 2).toUpperCase()}</span>
           <span className="hidden sm:inline">{me.username}</span>
@@ -76,7 +80,7 @@ export function TopBar() {
           variant="ghost"
           onClick={() => void signOut()}
         >
-          Logout
+          {t("Logout")}
         </Button>
       </div>
     </header>

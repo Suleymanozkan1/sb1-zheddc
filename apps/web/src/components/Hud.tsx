@@ -1,10 +1,11 @@
-import { REGIONS, generateArena } from "@cryptoarena/game-core";
+import { CHARACTERS, NPCS, REGIONS, generateArena } from "@cryptoarena/game-core";
 import { Button, cx } from "@cryptoarena/ui";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { REGION_STYLE } from "../game/art/world";
 import { useHud } from "../game/hud";
 import type { TouchInput } from "../game/input";
 import { useApp } from "../lib/store";
+import { useT, useTc } from "../lib/i18n";
 
 const css = (n: number): string => `#${n.toString(16).padStart(6, "0")}`;
 
@@ -194,6 +195,7 @@ function Minimap() {
   }, [minimap, map, worldSize]);
 
   const accent = css(REGION_STYLE[regionKey]?.accent ?? 0x22d3ee);
+  const tc = useTc();
   return (
     <div className="hud-panel p-2" style={{ ["--hud-accent" as string]: accent }}>
       <div className="relative">
@@ -201,7 +203,7 @@ function Minimap() {
         <span className="absolute top-0 left-1/2 -translate-x-1/2 font-display text-[10px] font-bold text-slate-300">N</span>
       </div>
       <div className="mt-1 text-center font-display text-[10px] font-bold tracking-[0.2em] uppercase" style={{ color: accent }}>
-        {region}
+        {tc("region", regionKey, region)}
       </div>
     </div>
   );
@@ -218,14 +220,16 @@ function RegionBanner() {
     last.current = regionKey;
     setShown((s) => ({ key: regionKey, name: region, n: (s?.n ?? 0) + 1 }));
   }, [regionKey, region]);
+  const t = useT();
+  const tc = useTc();
   if (!shown) return null;
   const def = REGIONS.find((r) => r.key === shown.key);
   const accent = css(REGION_STYLE[shown.key]?.accent ?? 0x22d3ee);
   return (
     <div key={shown.n} className="hud-banner absolute top-28 left-1/2 text-center">
-      <div className="font-display text-[10px] font-bold tracking-[0.5em] text-slate-400">TIER {def?.tier ?? 1} REGION</div>
+      <div className="font-display text-[10px] font-bold tracking-[0.5em] text-slate-400">{t("TIER {n} REGION", { n: def?.tier ?? 1 })}</div>
       <div className="font-display text-3xl font-black uppercase" style={{ color: accent, textShadow: `0 0 18px ${accent}, 0 2px 0 #000` }}>
-        {shown.name}
+        {tc("region", shown.key, shown.name)}
       </div>
       <div className="mx-auto mt-1 h-px w-64" style={{ background: `linear-gradient(90deg, transparent, ${accent}, transparent)` }} />
     </div>
@@ -245,6 +249,14 @@ export function Hud({ onLeave, touch }: { onLeave: () => void; touch: TouchInput
   const hpColor = hpPct > 0.5 ? "#4ade80" : hpPct > 0.25 ? "#facc15" : "#f43f5e";
   const respawnIn = Math.max(0, Math.ceil((h.respawnAt - now) / 1000));
   const rank = h.scoreboard.findIndex((p) => p.name === h.selfName) + 1;
+  const t = useT();
+  const tc = useTc();
+  const heroDef = CHARACTERS.find((c) => c.key === h.selfClass);
+  /** Creature names arrive in English from the simulation; heroes keep their player names. */
+  const who = (name: string): string => {
+    const npc = NPCS.find((n) => n.name === name);
+    return npc ? tc("npc", npc.key, name) : name === "the arena" ? t("the arena") : name;
+  };
 
   return (
     <div className="pointer-events-none absolute inset-0 z-10 select-none">
@@ -258,7 +270,7 @@ export function Hud({ onLeave, touch }: { onLeave: () => void; touch: TouchInput
             <div className="flex items-baseline justify-between gap-2">
               <span className="truncate font-display text-sm font-black text-white">{h.selfName}</span>
               <span className="font-display text-[10px] font-bold tracking-widest uppercase" style={{ color }}>
-                {h.selfClass}
+                {tc("char", h.selfClass, h.selfClass)}
               </span>
             </div>
             <VitalBar value={h.hp} max={h.maxHp} color={hpColor} height={16} label={`${Math.round(h.hp)} / ${h.maxHp} HP`} />
@@ -282,12 +294,12 @@ export function Hud({ onLeave, touch }: { onLeave: () => void; touch: TouchInput
       {h.mode === "RANKED" && (
         <div className="absolute top-3 left-1/2 -translate-x-1/2">
           <div className="hud-panel px-6 py-2 text-center" style={{ ["--hud-accent" as string]: "#f43f5e" }}>
-            <div className="font-display text-[9px] font-bold tracking-[0.4em] text-rose-300">RANKED</div>
+            <div className="font-display text-[9px] font-bold tracking-[0.4em] text-rose-300">{t("RANKED")}</div>
             <div className="font-display text-xl font-black text-white tabular-nums">
-              {h.phase === "waiting" && <span className="text-base text-slate-300">Waiting for players…</span>}
+              {h.phase === "waiting" && <span className="text-base text-slate-300">{t("Waiting for players…")}</span>}
               {h.phase === "countdown" && <span className="text-amber-300">{phaseLeft}</span>}
               {h.phase === "running" && `${Math.floor(phaseLeft / 60)}:${String(phaseLeft % 60).padStart(2, "0")}`}
-              {h.phase === "ended" && <span className="text-base">Match over</span>}
+              {h.phase === "ended" && <span className="text-base">{t("Match over")}</span>}
             </div>
           </div>
         </div>
@@ -301,9 +313,9 @@ export function Hud({ onLeave, touch }: { onLeave: () => void; touch: TouchInput
         <ul className="flex w-72 flex-col gap-1 text-xs">
           {h.killFeed.map((k) => (
             <li key={k.id} className="hud-feed flex items-center justify-end gap-2 rounded-sm border-r-2 border-rose-500 bg-gradient-to-l from-slate-950/90 to-slate-950/20 px-2 py-1">
-              <span className="font-semibold text-amber-300">{k.killerName}</span>
+              <span className="font-semibold text-amber-300">{who(k.killerName)}</span>
               <Icon name="sword" className="h-3.5 w-3.5" color="#f87171" />
-              <span className={k.victimIsNpc ? "text-rose-300" : "font-semibold text-cyan-200"}>{k.victimName}</span>
+              <span className={k.victimIsNpc ? "text-rose-300" : "font-semibold text-cyan-200"}>{who(k.victimName)}</span>
             </li>
           ))}
         </ul>
@@ -320,20 +332,20 @@ export function Hud({ onLeave, touch }: { onLeave: () => void; touch: TouchInput
 
       {/* Interaction prompts */}
       <div className="absolute bottom-36 left-1/2 flex -translate-x-1/2 flex-col items-center gap-1.5">
-        {h.nearLoot && <Prompt k="E" text="Pick up loot" color="#fbbf24" />}
-        {h.nearMerchant && <Prompt k="B" text="Buy 5 potions" color="#38bdf8" />}
+        {h.nearLoot && <Prompt k="E" text={t("Pick up loot")} color="#fbbf24" />}
+        {h.nearMerchant && <Prompt k="B" text={t("Buy 5 potions")} color="#38bdf8" />}
       </div>
 
       {/* Bottom: ability dock */}
       {self && (
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
           <div className="hud-panel flex items-end gap-5 px-6 pt-4 pb-2">
-            <AbilitySlot icon="attack" keyLabel="LMB" name="Attack" readyAt={self.cooldowns.attack} now={now} color="#e2e8f0" />
-            <AbilitySlot icon="dash" keyLabel="SPACE" name="Dash" readyAt={self.cooldowns.dash} now={now} color="#7dd3fc" />
-            <AbilitySlot icon="skill" keyLabel="Q" name={self.skillName} readyAt={self.cooldowns.skill} now={now} color="#22d3ee" />
-            <AbilitySlot icon="ultimate" keyLabel="R" name={self.ultimateName} readyAt={self.cooldowns.ultimate} now={now} color="#e879f9" />
+            <AbilitySlot icon="attack" keyLabel="LMB" name={t("Attack")} readyAt={self.cooldowns.attack} now={now} color="#e2e8f0" />
+            <AbilitySlot icon="dash" keyLabel="SPACE" name={t("Dash")} readyAt={self.cooldowns.dash} now={now} color="#7dd3fc" />
+            <AbilitySlot icon="skill" keyLabel="Q" name={heroDef ? tc("skill", heroDef.skill.key, self.skillName) : self.skillName} readyAt={self.cooldowns.skill} now={now} color="#22d3ee" />
+            <AbilitySlot icon="ultimate" keyLabel="R" name={heroDef ? tc("skill", heroDef.ultimate.key, self.ultimateName) : self.ultimateName} readyAt={self.cooldowns.ultimate} now={now} color="#e879f9" />
             <div className="mx-1 h-12 w-px self-center bg-white/10" />
-            <AbilitySlot icon="potion" keyLabel="F" name="Potion" readyAt={0} now={now} color="#f472b6" count={self.potions} />
+            <AbilitySlot icon="potion" keyLabel="F" name={t("Potion")} readyAt={0} now={now} color="#f472b6" count={self.potions} />
           </div>
         </div>
       )}
@@ -342,13 +354,13 @@ export function Hud({ onLeave, touch }: { onLeave: () => void; touch: TouchInput
       {!h.alive && h.connected && (
         <div className="absolute inset-0 flex items-center justify-center bg-[radial-gradient(ellipse_at_center,rgb(76_5_25/0.35),rgb(2_6_23/0.85))] backdrop-grayscale">
           <div className="text-center">
-            <div className="font-display text-xs font-bold tracking-[0.6em] text-rose-300/80">YOU WERE</div>
+            <div className="font-display text-xs font-bold tracking-[0.6em] text-rose-300/80">{t("YOU WERE")}</div>
             <h2 className="font-display text-6xl font-black text-rose-500" style={{ textShadow: "0 0 30px #f43f5e, 0 4px 0 #000" }}>
-              ELIMINATED
+              {t("ELIMINATED")}
             </h2>
             {h.killedBy && (
               <p className="mt-3 text-slate-300">
-                by <span className="font-display font-bold text-amber-300">{h.killedBy}</span>
+                {t("by")} <span className="font-display font-bold text-amber-300">{who(h.killedBy)}</span>
               </p>
             )}
             <div className="relative mx-auto mt-6 h-20 w-20">
@@ -358,7 +370,7 @@ export function Hud({ onLeave, touch }: { onLeave: () => void; touch: TouchInput
               </svg>
               <span className="absolute inset-0 flex items-center justify-center font-display text-3xl font-black text-white">{respawnIn}</span>
             </div>
-            <p className="mt-2 text-xs tracking-widest text-slate-400">RESPAWNING</p>
+            <p className="mt-2 text-xs tracking-widest text-slate-400">{t("RESPAWNING")}</p>
           </div>
         </div>
       )}
@@ -377,7 +389,7 @@ export function Hud({ onLeave, touch }: { onLeave: () => void; touch: TouchInput
             ] as const
           ).map(([label, down, up]) => (
             <button key={label} onPointerDown={down} onPointerUp={up} className="h-14 w-14 rounded-full border border-cyan-400/40 bg-slate-950/80 font-display text-xs font-bold text-cyan-100 shadow-[0_0_14px_#22d3ee44] active:scale-95">
-              {label}
+              {t(label)}
             </button>
           ))}
         </div>
@@ -386,7 +398,7 @@ export function Hud({ onLeave, touch }: { onLeave: () => void; touch: TouchInput
       {/* Leave */}
       <div className="pointer-events-auto absolute bottom-3 left-3">
         <Button size="sm" variant="secondary" onClick={onLeave}>
-          ⟵ Menu
+          ⟵ {t("Menu")}
         </Button>
       </div>
 
@@ -394,8 +406,8 @@ export function Hud({ onLeave, touch }: { onLeave: () => void; touch: TouchInput
       <div className="absolute right-3 bottom-3 hidden w-60 text-xs md:block">
         <div className="hud-panel p-2.5" style={{ ["--hud-accent" as string]: "#fbbf24" }}>
           <div className="mb-1.5 flex justify-between font-display text-[9px] font-bold tracking-[0.3em] text-slate-400">
-            <span>LEADERS</span>
-            {rank > 0 && <span className="text-cyan-300">YOU #{rank}</span>}
+            <span>{t("LEADERS")}</span>
+            {rank > 0 && <span className="text-cyan-300">{t("YOU #{n}", { n: rank })}</span>}
           </div>
           {h.scoreboard.slice(0, 6).map((p, i) => (
             <div key={p.id} className={cx("flex items-center justify-between rounded px-1 py-0.5", p.name === h.selfName && "bg-cyan-400/10")}>
@@ -415,7 +427,7 @@ export function Hud({ onLeave, touch }: { onLeave: () => void; touch: TouchInput
         <div className="pointer-events-auto absolute inset-0 flex items-center justify-center bg-black/75 backdrop-blur-sm">
           <div className="hud-panel w-full max-w-md p-6">
             <h2 className="mb-4 text-center font-display text-3xl font-black text-cyan-300" style={{ textShadow: "0 0 20px #22d3ee" }}>
-              MATCH RESULTS
+              {t("MATCH RESULTS")}
             </h2>
             <ol className="flex flex-col gap-1 text-sm">
               {h.standings.slice(0, 10).map((s) => (
@@ -430,7 +442,7 @@ export function Hud({ onLeave, touch }: { onLeave: () => void; touch: TouchInput
               ))}
             </ol>
             <Button variant="primary" className="mt-5 w-full" onClick={onLeave}>
-              Back to menu
+              {t("Back to menu")}
             </Button>
           </div>
         </div>

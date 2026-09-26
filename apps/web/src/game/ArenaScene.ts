@@ -19,6 +19,7 @@ import {
 } from "@cryptoarena/game-core";
 import { Buttons, RARITY_COLORS, type Rarity } from "@cryptoarena/shared";
 import Phaser from "phaser";
+import { t, tc } from "../lib/i18n";
 import { useApp } from "../lib/store";
 import { playAbility, type FxHost } from "./abilityFx";
 import { useHud, type MinimapDot } from "./hud";
@@ -187,7 +188,7 @@ export class ArenaScene extends Phaser.Scene {
       const stall = this.add.image(m.x, m.y, "merchant").setDepth(1);
       this.tweens.add({ targets: stall, y: m.y - 4, yoyo: true, repeat: -1, duration: 1600, ease: "Sine.easeInOut" });
       this.add
-        .text(m.x, m.y - 72, "◆ MERCHANT  [B]", { fontFamily: DISPLAY_FONT, fontSize: "14px", color: "#7dd3fc", stroke: "#020617", strokeThickness: 5 })
+        .text(m.x, m.y - 72, `◆ ${t("MERCHANT")}  [B]`, { fontFamily: DISPLAY_FONT, fontSize: "14px", color: "#7dd3fc", stroke: "#020617", strokeThickness: 5 })
         .setOrigin(0.5)
         .setDepth(1);
     }
@@ -410,7 +411,7 @@ export class ArenaScene extends Phaser.Scene {
         creatureTextureKey(n.kind),
         scale,
         def?.color ?? 0x94a3b8,
-        n.kind === "titan" ? `☠ ${def?.name ?? n.kind}` : `${def?.name ?? n.kind}  ${def?.level ?? ""}`,
+        n.kind === "titan" ? `☠ ${tc("npc", n.kind, def?.name ?? n.kind)}` : `${tc("npc", n.kind, def?.name ?? n.kind)}  ${def?.level ?? ""}`,
         n.kind === "titan" ? "#fda4af" : "#e2e8f0",
       );
       if (n.kind === "chest") {
@@ -477,7 +478,7 @@ export class ArenaScene extends Phaser.Scene {
         .setBlendMode(Phaser.BlendModes.ADD);
       const gem = this.add.image(0, 0, "loot_gem").setTint(color).setScale(0.55);
       const text = this.add
-        .text(0, -30, l.name, { fontFamily: DISPLAY_FONT, fontSize: "10px", color: RARITY_COLORS[l.rarity as Rarity] ?? "#fff", stroke: "#020617", strokeThickness: 4 })
+        .text(0, -30, tc("item", l.itemKey, l.name), { fontFamily: DISPLAY_FONT, fontSize: "10px", color: RARITY_COLORS[l.rarity as Rarity] ?? "#fff", stroke: "#020617", strokeThickness: 4 })
         .setOrigin(0.5);
       const c = this.add.container(l.x, l.y, [glow, beam, gem, text]).setDepth(5);
       this.tweens.add({ targets: gem, y: -7, angle: 10, yoyo: true, repeat: -1, duration: 750, ease: "Sine.easeInOut" });
@@ -681,15 +682,17 @@ export class ArenaScene extends Phaser.Scene {
     this.conn.on("player_level_up", (m) => {
       const b = this.players.get(m.id);
       if (b) this.levelUp(b.container.x, b.container.y);
-      if (m.id === me) useHud.getState().pushNotice(`LEVEL UP! → ${m.level}`, "#facc15");
+      if (m.id === me) useHud.getState().pushNotice(t("LEVEL UP! → {n}", { n: m.level }), "#facc15");
     });
     this.conn.on("item_pickup", (m) => {
       const color = RARITY_COLORS[m.rarity] ?? "#fff";
-      useHud.getState().pushNotice(m.gold ? `+${m.name} (+${m.gold} gold)` : `Picked up ${m.name}`, color);
+      const name = RESOURCES.some((r) => r.key === m.itemKey) ? tc("resource", m.itemKey, m.name) : tc("item", m.itemKey, m.name);
+      useHud.getState().pushNotice(m.gold ? t("+{name} (+{gold} gold)", { name, gold: m.gold }) : t("Picked up {name}", { name }), color);
     });
     this.conn.on("quest_complete", (m) => {
-      useHud.getState().pushNotice(`Quest complete: ${m.name}`, "#a3e635");
-      useApp.getState().toast("success", `Quest complete: ${m.name} — claim it in Quests`);
+      const name = tc("quest", m.questKey, m.name);
+      useHud.getState().pushNotice(t("Quest complete: {name}", { name }), "#a3e635");
+      useApp.getState().toast("success", t("Quest complete: {name} — claim it in Quests", { name }));
     });
     this.conn.on("reward_granted", (m) => {
       const d = useApp.getState().me?.balances.cryptoDecimals ?? 6;
@@ -697,8 +700,8 @@ export class ArenaScene extends Phaser.Scene {
       const amount = Number(BigInt(m.amount)) / 10 ** d;
       useHud.getState().pushNotice(`+${amount.toFixed(3)} ${sym} (${m.source.toLowerCase()})`, "#e879f9");
     });
-    this.conn.on("notice", (m) => useHud.getState().pushNotice(m.message, m.level === "error" ? "#f87171" : m.level === "warn" ? "#fbbf24" : "#7dd3fc"));
-    this.conn.on("match_start", () => useHud.getState().pushNotice("MATCH STARTED — FIGHT!", "#f43f5e"));
+    this.conn.on("notice", (m) => useHud.getState().pushNotice(t(m.message), m.level === "error" ? "#f87171" : m.level === "warn" ? "#fbbf24" : "#7dd3fc"));
+    this.conn.on("match_start", () => useHud.getState().pushNotice(t("MATCH STARTED — FIGHT!"), "#f43f5e"));
     this.conn.on("match_end", (m) => useHud.getState().set({ standings: m.standings }));
     this.conn.on("item_drop", () => undefined);
     this.conn.on("player_join", () => undefined);

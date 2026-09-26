@@ -76,3 +76,19 @@ test("offline demo: runs in the browser without calling the API", async ({ page 
   await expect(page.getByRole("button", { name: "PLAY NOW" })).toBeVisible();
   expect(apiCalls).toEqual([]);
 });
+
+test("language switch: the interface can be shown in Turkish", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: /^tr$/i }).click();
+  await expect(page.getByRole("button", { name: "HEMEN OYNA" })).toBeVisible();
+  await page.getByRole("button", { name: "HEMEN OYNA" }).click();
+  await page.getByRole("button", { name: "Çevrimdışı demoyu dene" }).click();
+  await expect(page.getByText("Tekrar hoş geldin")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Karakterler", exact: true })).toBeVisible();
+  // The choice persists across reloads; switching back restores English.
+  await page.reload();
+  await expect(page.getByText("Tekrar hoş geldin")).toBeVisible();
+  await page.getByRole("button", { name: /^en$/i }).click();
+  await expect(page.getByText("Welcome back")).toBeVisible();
+  await page.getByRole("button", { name: "Logout" }).click();
+});
