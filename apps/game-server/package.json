@@ -1,0 +1,31 @@
+{
+  "name": "@cryptoarena/game-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --clear-screen=false src/main.ts",
+    "start": "node dist/main.js",
+    "build": "node ../../scripts/build-node.mjs src/main.ts dist/main.js",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@colyseus/core": "^0.18.16",
+    "@colyseus/schema": "^5.0.34",
+    "@colyseus/ws-transport": "^0.18.3",
+    "@cryptoarena/config": "workspace:*",
+    "@cryptoarena/database": "workspace:*",
+    "@cryptoarena/economy": "workspace:*",
+    "@cryptoarena/game-core": "workspace:*",
+    "@cryptoarena/observability": "workspace:*",
+    "@cryptoarena/shared": "workspace:*",
+    "jose": "^6.2.12",
+    "zod": "^4.6.5",
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "@colyseus/sdk": "^0.18.4",
+    "esbuild": "^0.28.2",
+    "@types/express": "^5.0.6"
+  }
+}

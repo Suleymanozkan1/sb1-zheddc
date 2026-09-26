@@ -1,0 +1,98 @@
+# Local development stack.
+#   docker compose up -d postgres redis          # infrastructure only (use `pnpm dev` for apps)
+#   docker compose --profile apps up --build     # everything in containers
+name: cryptoarena
+
+x-app-env: &app-env
+  NODE_ENV: development
+  DATABASE_URL: postgresql://cryptoarena:cryptoarena@postgres:5432/cryptoarena
+  REDIS_URL: redis://redis:6379
+  JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+  PUBLIC_WEB_ORIGINS: http://localhost:8080,http://localhost:8081,http://localhost:5173,http://localhost:5174
+  SOLANA_NETWORK: ${SOLANA_NETWORK:-devnet}
+  SOLANA_RPC_URL: ${SOLANA_RPC_URL:-https://api.devnet.solana.com}
+  SOLANA_MOCK: ${SOLANA_MOCK:-true}
+  TREASURY_PUBLIC_KEY: ${TREASURY_PUBLIC_KEY:-}
+  REWARD_TOKEN_MINT: ${REWARD_TOKEN_MINT:-}
+  REWARD_TOKEN_DECIMALS: ${REWARD_TOKEN_DECIMALS:-6}
+  DEV_BOTS: ${DEV_BOTS:-6}
+  TRUST_PROXY_HOPS: "1"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: cryptoarena
+      POSTGRES_PASSWORD: cryptoarena
+      POSTGRES_DB: cryptoarena
+    ports: ["5432:5432"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/init-test-db.sql:/docker-entrypoint-initdb.d/init-test-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cryptoarena"]
+      interval: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      retries: 20
+
+  migrate:
+    profiles: ["apps"]
+    build: { context: ., dockerfile: docker/node.Dockerfile, args: { APP: api } }
+    environment: *app-env
+    working_dir: /repo
+    command: ["sh", "-c", "node scripts/wait-for-db.mjs && node_modules/.bin/prisma migrate deploy && node_modules/.bin/tsx prisma/seed.ts"]
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  api:
+    profiles: ["apps"]
+    build: { context: ., dockerfile: docker/node.Dockerfile, args: { APP: api } }
+    environment: *app-env
+    ports: ["3000:3000"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 10s
+
+  game-server:
+    profiles: ["apps"]
+    build: { context: ., dockerfile: docker/node.Dockerfile, args: { APP: game-server } }
+    environment: *app-env
+    ports: ["2567:2567"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+
+  blockchain-service:
+    profiles: ["apps"]
+    build: { context: ., dockerfile: docker/node.Dockerfile, args: { APP: blockchain-service } }
+    environment:
+      <<: *app-env
+      BLOCKCHAIN_SERVICE_HOST: 0.0.0.0
+      # Only this service ever receives the treasury secret.
+      TREASURY_SECRET: ${TREASURY_SECRET:-}
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+
+  web:
+    profiles: ["apps"]
+    build: { context: ., dockerfile: docker/web.Dockerfile, args: { APP: web } }
+    ports: ["8080:80"]
+    depends_on: [api]
+
+  admin:
+    profiles: ["apps"]
+    build: { context: ., dockerfile: docker/web.Dockerfile, args: { APP: admin } }
+    ports: ["8081:80"]
+    depends_on: [api]
+
+volumes:
+  pgdata:

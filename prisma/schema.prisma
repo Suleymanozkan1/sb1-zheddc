@@ -1,0 +1,925 @@
+// CryptoArena database schema.
+//
+// Money-like values (gold, gems, token base units) are stored as BigInt.
+// Balances are derived from the append-only BalanceLedger; BalanceAccount.balance
+// is a cache updated inside the same database transaction as the ledger insert.
+// UPDATE/DELETE on BalanceLedger and AuditLog is blocked by database triggers
+// (see migrations/*_immutable_ledger).
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../packages/database/src/generated/prisma"
+  moduleFormat = "esm"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ───────────────────────────── Enums ─────────────────────────────
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  BANNED
+}
+
+enum PremiumTier {
+  FREE
+  VIP
+  ELITE
+}
+
+enum KycStatus {
+  NONE
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum NoncePurpose {
+  LOGIN
+  LINK_WALLET
+}
+
+enum CharacterClass {
+  WARRIOR
+  ASSASSIN
+  TANK
+  RANGER
+  MAGE
+}
+
+enum Rarity {
+  COMMON
+  UNCOMMON
+  RARE
+  EPIC
+  LEGENDARY
+  MYTHIC
+}
+
+enum StatKey {
+  HP
+  DAMAGE
+  ARMOR
+  SPEED
+  ATTACK_SPEED
+  CRIT_CHANCE
+}
+
+enum ItemType {
+  WEAPON
+  ARMOR
+  HELMET
+  BOOTS
+  RING
+  AMULET
+  SKIN
+  CONSUMABLE
+}
+
+enum ItemSource {
+  LOOT
+  SHOP
+  QUEST
+  ADMIN
+  STARTER
+  REWARD
+}
+
+enum MatchMode {
+  CASUAL
+  RANKED
+}
+
+enum MatchStatus {
+  WAITING
+  RUNNING
+  ENDED
+}
+
+enum QuestPeriod {
+  DAILY
+  WEEKLY
+  SEASONAL
+  ACHIEVEMENT
+}
+
+enum QuestObjective {
+  KILL_NPC
+  KILL_PLAYER
+  COLLECT_RESOURCE
+  OPEN_CHEST
+  PLAY_MATCH
+  WIN_MATCH
+  REACH_LEVEL
+  DEAL_DAMAGE
+}
+
+enum SeasonStatus {
+  UPCOMING
+  ACTIVE
+  ENDED
+}
+
+enum LeaderboardScope {
+  GLOBAL
+  DAILY
+  WEEKLY
+  SEASON
+}
+
+enum ProductCategory {
+  CHARACTER
+  SKIN
+  WEAPON
+  EQUIPMENT
+  BOOST
+  PREMIUM_PASS
+  COSMETIC
+  GEMS
+  CONSUMABLE
+}
+
+enum Asset {
+  GOLD
+  GEMS
+  CRYPTO
+}
+
+enum PurchaseStatus {
+  COMPLETED
+  REFUNDED
+}
+
+enum AccountOwner {
+  USER
+  SYSTEM
+}
+
+enum AccountKind {
+  GOLD
+  GEMS
+  CRYPTO_SPENDABLE
+  CRYPTO_REWARD
+  SYSTEM_ISSUANCE
+  SYSTEM_REVENUE
+  SYSTEM_EXTERNAL
+  SYSTEM_REWARD_POOL
+  SYSTEM_WITHDRAWAL_CLEARING
+  SYSTEM_FEES
+}
+
+enum TransactionType {
+  DEPOSIT
+  GAME_REWARD
+  PURCHASE
+  ITEM_UPGRADE
+  CHARACTER_UPGRADE
+  WITHDRAWAL
+  WITHDRAWAL_FEE
+  REFUND
+  ADMIN_ADJUSTMENT
+  POOL_FUNDING
+}
+
+enum LedgerDirection {
+  DEBIT
+  CREDIT
+}
+
+enum LedgerStatus {
+  POSTED
+}
+
+enum DepositStatus {
+  AWAITING_SIGNATURE
+  SUBMITTED
+  CREDITED
+  FAILED
+  EXPIRED
+}
+
+enum WithdrawalStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum ChainTxKind {
+  DEPOSIT
+  WITHDRAWAL
+}
+
+enum ChainTxStatus {
+  SUBMITTED
+  CONFIRMED
+  FINALIZED
+  FAILED
+}
+
+enum RewardSource {
+  KILL
+  QUEST
+  LEADERBOARD
+  DAILY
+  SEASONAL
+  TOURNAMENT
+  ACHIEVEMENT
+  EVENT
+}
+
+enum RewardStatus {
+  GRANTED
+  CAPPED
+  REJECTED
+}
+
+enum ClaimKind {
+  QUEST
+  DAILY_LOGIN
+  LEADERBOARD
+  SEASON
+}
+
+enum AdminRole {
+  SUPER_ADMIN
+  ADMIN
+  MODERATOR
+  SUPPORT
+}
+
+enum ActorType {
+  ADMIN
+  SYSTEM
+  USER
+}
+
+enum ComplianceFeature {
+  DEPOSIT
+  WITHDRAWAL
+  CRYPTO_REWARDS
+  PURCHASE
+  PLAY
+}
+
+// ───────────────────────────── Identity ─────────────────────────────
+
+model User {
+  id                   String      @id @default(uuid()) @db.Uuid
+  username             String      @unique
+  isGuest              Boolean     @default(false)
+  status               UserStatus  @default(ACTIVE)
+  banReason            String?
+  premiumTier          PremiumTier @default(FREE)
+  premiumUntil         DateTime?
+  withdrawalsSuspended Boolean     @default(false)
+  riskScore            Int         @default(0)
+  countryCode          String?     @db.VarChar(2)
+  ageVerified          Boolean     @default(false)
+  kycStatus            KycStatus   @default(NONE)
+  inventorySlots       Int         @default(60)
+  lastLoginAt          DateTime?
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
+
+  sessions       Session[]
+  wallets        Wallet[]
+  characters     UserCharacter[]
+  inventory      InventoryItem[]
+  matchPlayers   GameMatchPlayer[]
+  quests         UserQuest[]
+  leaderboard    LeaderboardEntry[]
+  purchases      Purchase[]
+  accounts       BalanceAccount[]
+  deposits       Deposit[]
+  withdrawals    Withdrawal[]
+  rewards        Reward[]
+  rewardClaims   RewardClaim[]
+  admin          AdminUser?
+  antiCheatFlags AntiCheatFlag[]
+  walletTxs      WalletTransaction[]
+  gameSeat       GameSeat?
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Session {
+  id               String    @id @default(uuid()) @db.Uuid
+  userId           String    @db.Uuid
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshTokenHash String    @unique
+  familyId         String    @db.Uuid
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  replacedById     String?   @db.Uuid
+  userAgent        String?
+  ip               String?
+  createdAt        DateTime  @default(now())
+
+  @@index([userId])
+  @@index([familyId])
+}
+
+model Wallet {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @db.Uuid
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  address    String   @unique
+  chain      String   @default("solana")
+  isPrimary  Boolean  @default(true)
+  verifiedAt DateTime
+  createdAt  DateTime @default(now())
+
+  deposits Deposit[]
+  txs      WalletTransaction[]
+
+  @@index([userId])
+}
+
+model WalletNonce {
+  id        String       @id @default(uuid()) @db.Uuid
+  address   String
+  nonce     String       @unique
+  message   String
+  purpose   NoncePurpose
+  userId    String?      @db.Uuid
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime     @default(now())
+
+  @@index([address, createdAt])
+  @@index([expiresAt])
+}
+
+model WalletTransaction {
+  id        String        @id @default(uuid()) @db.Uuid
+  userId    String        @db.Uuid
+  user      User          @relation(fields: [userId], references: [id])
+  walletId  String?       @db.Uuid
+  wallet    Wallet?       @relation(fields: [walletId], references: [id])
+  signature String        @unique
+  kind      ChainTxKind
+  network   String
+  mint      String
+  amount    BigInt
+  slot      BigInt?
+  status    ChainTxStatus
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  @@index([userId, createdAt])
+}
+
+// ───────────────────────────── Characters ─────────────────────────────
+
+model Character {
+  id          String         @id @default(uuid()) @db.Uuid
+  key         String         @unique
+  name        String
+  class       CharacterClass
+  rarity      Rarity
+  description String
+  skill       Json
+  ultimate    Json
+  isStarter   Boolean        @default(false)
+  active      Boolean        @default(true)
+  createdAt   DateTime       @default(now())
+
+  stats          CharacterStats?
+  userCharacters UserCharacter[]
+}
+
+/// Base stats and per-level growth of a character definition.
+model CharacterStats {
+  id              String    @id @default(uuid()) @db.Uuid
+  characterId     String    @unique @db.Uuid
+  character       Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  baseHp          Int
+  baseDamage      Int
+  baseArmor       Int
+  baseSpeed       Int
+  baseAttackSpeed Float
+  baseCritChance  Float
+  baseRange       Int
+  hpPerLevel      Int
+  damagePerLevel  Float
+  armorPerLevel   Float
+}
+
+/// A character owned by a user (level/xp progress lives here).
+model UserCharacter {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @db.Uuid
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  characterId String    @db.Uuid
+  character   Character @relation(fields: [characterId], references: [id])
+  level       Int       @default(1)
+  xp          Int       @default(0)
+  statPoints  Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  upgrades     CharacterUpgrade[]
+  matchPlayers GameMatchPlayer[]
+
+  @@unique([userId, characterId])
+}
+
+model CharacterUpgrade {
+  id              String        @id @default(uuid()) @db.Uuid
+  userCharacterId String        @db.Uuid
+  userCharacter   UserCharacter @relation(fields: [userCharacterId], references: [id], onDelete: Cascade)
+  stat            StatKey
+  points          Int           @default(0)
+  updatedAt       DateTime      @updatedAt
+
+  @@unique([userCharacterId, stat])
+}
+
+// ───────────────────────────── Items ─────────────────────────────
+
+model Item {
+  id               String   @id @default(uuid()) @db.Uuid
+  key              String   @unique
+  name             String
+  description      String
+  type             ItemType
+  rarity           Rarity
+  stats            Json
+  stackable        Boolean  @default(false)
+  maxStack         Int      @default(1)
+  maxUpgrade       Int      @default(20)
+  levelRequirement Int      @default(1)
+  dropWeight       Int      @default(0)
+  metadata         Json     @default("{}")
+  active           Boolean  @default(true)
+  createdAt        DateTime @default(now())
+
+  inventory InventoryItem[]
+
+  @@index([type, rarity])
+}
+
+model InventoryItem {
+  id           String     @id @default(uuid()) @db.Uuid
+  userId       String     @db.Uuid
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  itemId       String     @db.Uuid
+  item         Item       @relation(fields: [itemId], references: [id])
+  quantity     Int        @default(1)
+  upgradeLevel Int        @default(0)
+  equipped     Boolean    @default(false)
+  /// Slot key while equipped, e.g. "WEAPON" or "SKIN:warrior". Unique per user when equipped (partial index).
+  equippedSlot String?
+  source       ItemSource
+  /// Idempotency key of the grant (loot drop id, purchase id...). Prevents duplicate pickups.
+  sourceRef    String?    @unique
+  acquiredAt   DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@index([userId, equipped])
+  @@index([userId, itemId])
+}
+
+// ───────────────────────────── Matches ─────────────────────────────
+
+model GameMatch {
+  id           String      @id @default(uuid()) @db.Uuid
+  roomId       String
+  mode         MatchMode
+  mapKey       String
+  status       MatchStatus @default(WAITING)
+  seasonId     String?     @db.Uuid
+  season       Season?     @relation(fields: [seasonId], references: [id])
+  maxPlayers   Int
+  tickRate     Int
+  winnerUserId String?     @db.Uuid
+  startedAt    DateTime?
+  endedAt      DateTime?
+  createdAt    DateTime    @default(now())
+
+  players GameMatchPlayer[]
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+model GameMatchPlayer {
+  id              String        @id @default(uuid()) @db.Uuid
+  matchId         String        @db.Uuid
+  match           GameMatch     @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  userId          String        @db.Uuid
+  user            User          @relation(fields: [userId], references: [id])
+  userCharacterId String        @db.Uuid
+  userCharacter   UserCharacter @relation(fields: [userCharacterId], references: [id])
+  kills           Int           @default(0)
+  deaths          Int           @default(0)
+  npcKills        Int           @default(0)
+  damageDealt     Int           @default(0)
+  xpEarned        Int           @default(0)
+  goldEarned      Int           @default(0)
+  score           Int           @default(0)
+  placement       Int?
+  joinedAt        DateTime      @default(now())
+  leftAt          DateTime?
+
+  @@unique([matchId, userId])
+  @@index([userId, joinedAt])
+}
+
+// ───────────────────────────── Quests ─────────────────────────────
+
+model Quest {
+  id           String         @id @default(uuid()) @db.Uuid
+  key          String         @unique
+  name         String
+  description  String
+  period       QuestPeriod
+  objective    QuestObjective
+  target       Int
+  rewardGold   BigInt         @default(0)
+  rewardGems   BigInt         @default(0)
+  rewardXp     Int            @default(0)
+  /// Base crypto reward (token base units) before multipliers; subject to reward budgets.
+  rewardCrypto BigInt         @default(0)
+  requiredTier PremiumTier    @default(FREE)
+  active       Boolean        @default(true)
+  createdAt    DateTime       @default(now())
+
+  userQuests UserQuest[]
+}
+
+model UserQuest {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @db.Uuid
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  questId     String    @db.Uuid
+  quest       Quest     @relation(fields: [questId], references: [id])
+  periodKey   String
+  progress    Int       @default(0)
+  completedAt DateTime?
+  claimedAt   DateTime?
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([userId, questId, periodKey])
+  @@index([userId, periodKey])
+}
+
+// ───────────────────────────── Seasons & leaderboards ─────────────────────────────
+
+model Season {
+  id                String       @id @default(uuid()) @db.Uuid
+  key               String       @unique
+  name              String
+  status            SeasonStatus @default(UPCOMING)
+  startsAt          DateTime
+  endsAt            DateTime
+  /// Total crypto reward budget for the season (token base units).
+  rewardPool        BigInt
+  /// Maximum crypto rewards that may be granted per UTC day.
+  dailyRewardBudget BigInt
+  /// Reward multiplier in basis points (10000 = 1.0x).
+  multiplierBps     Int          @default(10000)
+  createdAt         DateTime     @default(now())
+
+  matches      GameMatch[]
+  leaderboards Leaderboard[]
+  rewards      Reward[]
+
+  @@index([status])
+}
+
+model Leaderboard {
+  id                   String           @id @default(uuid()) @db.Uuid
+  key                  String           @unique
+  scope                LeaderboardScope
+  periodKey            String
+  seasonId             String?          @db.Uuid
+  season               Season?          @relation(fields: [seasonId], references: [id])
+  startsAt             DateTime?
+  endsAt               DateTime?
+  finalizedAt          DateTime?
+  rewardsDistributedAt DateTime?
+  createdAt            DateTime         @default(now())
+
+  entries LeaderboardEntry[]
+
+  @@index([scope, periodKey])
+}
+
+model LeaderboardEntry {
+  id            String      @id @default(uuid()) @db.Uuid
+  leaderboardId String      @db.Uuid
+  leaderboard   Leaderboard @relation(fields: [leaderboardId], references: [id], onDelete: Cascade)
+  userId        String      @db.Uuid
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kills         Int         @default(0)
+  npcKills      Int         @default(0)
+  xp            Int         @default(0)
+  wins          Int         @default(0)
+  arenaScore    Int         @default(0)
+  score         Int         @default(0)
+  updatedAt     DateTime    @updatedAt
+
+  @@unique([leaderboardId, userId])
+  @@index([leaderboardId, score(sort: Desc)])
+}
+
+// ───────────────────────────── Shop ─────────────────────────────
+
+model ShopProduct {
+  id           String          @id @default(uuid()) @db.Uuid
+  sku          String          @unique
+  name         String
+  description  String
+  category     ProductCategory
+  price        BigInt
+  currency     Asset
+  rarity       Rarity          @default(COMMON)
+  /// What the product grants, validated by the economy package (see shared ProductGrant).
+  metadata     Json
+  active       Boolean         @default(true)
+  perUserLimit Int?
+  sortOrder    Int             @default(0)
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  purchases Purchase[]
+
+  @@index([active, category])
+}
+
+model Purchase {
+  id              String         @id @default(uuid()) @db.Uuid
+  userId          String         @db.Uuid
+  user            User           @relation(fields: [userId], references: [id])
+  productId       String         @db.Uuid
+  product         ShopProduct    @relation(fields: [productId], references: [id])
+  quantity        Int            @default(1)
+  unitPrice       BigInt
+  totalPrice      BigInt
+  currency        Asset
+  status          PurchaseStatus @default(COMPLETED)
+  idempotencyKey  String         @unique
+  journalId       String         @db.Uuid
+  refundJournalId String?        @db.Uuid
+  refundedAt      DateTime?
+  createdAt       DateTime       @default(now())
+
+  @@index([userId, createdAt])
+  @@index([userId, productId])
+}
+
+// ───────────────────────────── Ledger ─────────────────────────────
+
+model BalanceAccount {
+  id            String       @id @default(uuid()) @db.Uuid
+  ownerType     AccountOwner
+  userId        String?      @db.Uuid
+  user          User?        @relation(fields: [userId], references: [id])
+  systemKey     String?      @unique
+  asset         Asset
+  kind          AccountKind
+  /// Cached balance = sum(CREDIT) - sum(DEBIT) of this account's ledger rows.
+  balance       BigInt       @default(0)
+  allowNegative Boolean      @default(false)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  entries BalanceLedger[]
+
+  @@unique([userId, kind])
+  @@index([kind])
+}
+
+model LedgerJournal {
+  id             String          @id @default(uuid()) @db.Uuid
+  type           TransactionType
+  idempotencyKey String          @unique
+  reference      String?
+  description    String?
+  adminUserId    String?         @db.Uuid
+  metadata       Json            @default("{}")
+  createdAt      DateTime        @default(now())
+
+  entries BalanceLedger[]
+
+  @@index([type, createdAt])
+  @@index([reference])
+}
+
+/// Append-only. Rows are never updated or deleted; corrections are new compensating journals.
+model BalanceLedger {
+  id           String          @id @default(uuid()) @db.Uuid
+  journalId    String          @db.Uuid
+  journal      LedgerJournal   @relation(fields: [journalId], references: [id])
+  accountId    String          @db.Uuid
+  account      BalanceAccount  @relation(fields: [accountId], references: [id])
+  userId       String?         @db.Uuid
+  type         TransactionType
+  amount       BigInt
+  asset        Asset
+  direction    LedgerDirection
+  reference    String?
+  status       LedgerStatus    @default(POSTED)
+  balanceAfter BigInt
+  metadata     Json            @default("{}")
+  createdAt    DateTime        @default(now())
+
+  @@index([accountId, createdAt])
+  @@index([userId, createdAt])
+  @@index([journalId])
+  @@index([type, createdAt])
+}
+
+// ───────────────────────────── Deposits & withdrawals ─────────────────────────────
+
+model Deposit {
+  id            String        @id @default(uuid()) @db.Uuid
+  userId        String        @db.Uuid
+  user          User          @relation(fields: [userId], references: [id])
+  walletId      String        @db.Uuid
+  wallet        Wallet        @relation(fields: [walletId], references: [id])
+  network       String
+  mint          String
+  amount        BigInt
+  /// Treasury token account expected to receive the funds.
+  recipient     String
+  /// Unique read-only reference key embedded in the transfer instruction.
+  reference     String        @unique
+  signature     String?       @unique
+  status        DepositStatus @default(AWAITING_SIGNATURE)
+  failureReason String?
+  slot          BigInt?
+  journalId     String?       @db.Uuid
+  expiresAt     DateTime
+  creditedAt    DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([status])
+}
+
+model Withdrawal {
+  id                   String           @id @default(uuid()) @db.Uuid
+  userId               String           @db.Uuid
+  user                 User             @relation(fields: [userId], references: [id])
+  walletAddress        String
+  network              String
+  mint                 String
+  amount               BigInt
+  fee                  BigInt
+  status               WithdrawalStatus @default(PENDING)
+  requiresReview       Boolean          @default(false)
+  reviewNote           String?
+  reviewedByAdminId    String?          @db.Uuid
+  reviewedAt           DateTime?
+  signature            String?          @unique
+  lastValidBlockHeight BigInt?
+  attempts             Int              @default(0)
+  nextAttemptAt        DateTime         @default(now())
+  lockedAt             DateTime?
+  /// Fencing token of the worker that currently owns the row (rotated on every claim).
+  lockToken            String?          @db.Uuid
+  lastError            String?
+  idempotencyKey       String           @unique
+  holdJournalId        String           @db.Uuid
+  settleJournalId      String?          @db.Uuid
+  completedAt          DateTime?
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+
+  @@index([status, nextAttemptAt])
+  @@index([userId, createdAt])
+}
+
+// ───────────────────────────── Rewards ─────────────────────────────
+
+model Reward {
+  id             String       @id @default(uuid()) @db.Uuid
+  userId         String       @db.Uuid
+  user           User         @relation(fields: [userId], references: [id])
+  source         RewardSource
+  asset          Asset
+  baseAmount     BigInt
+  performanceBps Int
+  eventBps       Int
+  seasonBps      Int
+  amount         BigInt
+  status         RewardStatus
+  reason         String?
+  seasonId       String?      @db.Uuid
+  season         Season?      @relation(fields: [seasonId], references: [id])
+  matchId        String?      @db.Uuid
+  idempotencyKey String       @unique
+  journalId      String?      @db.Uuid
+  createdAt      DateTime     @default(now())
+
+  claims RewardClaim[]
+
+  @@index([userId, createdAt])
+  @@index([asset, status, createdAt])
+}
+
+model RewardClaim {
+  id           String    @id @default(uuid()) @db.Uuid
+  userId       String    @db.Uuid
+  user         User      @relation(fields: [userId], references: [id])
+  kind         ClaimKind
+  referenceKey String
+  rewardId     String?   @db.Uuid
+  reward       Reward?   @relation(fields: [rewardId], references: [id])
+  createdAt    DateTime  @default(now())
+
+  @@unique([userId, kind, referenceKey])
+}
+
+// ───────────────────────────── Admin, audit, security ─────────────────────────────
+
+model AdminUser {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @unique @db.Uuid
+  user        User      @relation(fields: [userId], references: [id])
+  role        AdminRole
+  active      Boolean   @default(true)
+  createdById String?   @db.Uuid
+  createdAt   DateTime  @default(now())
+
+  auditLogs AuditLog[]
+}
+
+/// Append-only audit trail (UPDATE/DELETE blocked by trigger).
+model AuditLog {
+  id          String     @id @default(uuid()) @db.Uuid
+  actorType   ActorType
+  adminUserId String?    @db.Uuid
+  admin       AdminUser? @relation(fields: [adminUserId], references: [id])
+  userId      String?    @db.Uuid
+  action      String
+  targetType  String
+  targetId    String?
+  before      Json?
+  after       Json?
+  reason      String?
+  ip          String?
+  createdAt   DateTime   @default(now())
+
+  @@index([action, createdAt])
+  @@index([targetType, targetId])
+  @@index([userId, createdAt])
+}
+
+model AntiCheatFlag {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  user      User     @relation(fields: [userId], references: [id])
+  matchId   String?  @db.Uuid
+  kind      String
+  severity  Int
+  details   Json     @default("{}")
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([kind, createdAt])
+}
+
+/// Compliance hook: per-country feature restrictions (geofencing / licensing).
+model ComplianceRule {
+  id          String            @id @default(uuid()) @db.Uuid
+  countryCode String            @db.VarChar(2)
+  feature     ComplianceFeature
+  allowed     Boolean
+  requiresKyc Boolean           @default(false)
+  minAge      Int?
+  note        String?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@unique([countryCode, feature])
+}
+
+model FeatureFlag {
+  key       String   @id
+  enabled   Boolean
+  note      String?
+  updatedAt DateTime @updatedAt
+}
+
+/// Cross-process "one live character per account" lease held by a game-server room.
+/// Rooms renew their leases while the player is connected; an expired lease can be taken over.
+model GameSeat {
+  userId    String   @id @db.Uuid
+  roomId    String
+  /// Fencing token: rotated on every claim. Renew/release only touch the lease holding this token.
+  token     String   @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  expiresAt DateTime
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([roomId])
+}

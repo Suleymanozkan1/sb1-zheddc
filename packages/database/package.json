@@ -1,0 +1,14 @@
+{
+  "name": "@cryptoarena/database",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {"@prisma/adapter-pg": "^7.10.0", "@prisma/client": "^7.10.0", "pg": "^8.23.0"},
+  "devDependencies": {"@types/pg": "^8.23.1"}
+}

@@ -1,0 +1,36 @@
+[submodule "repos/colyseus-tutorial-phaser"]
+	path = repos/colyseus-tutorial-phaser
+	url = https://github.com/colyseus/tutorial-phaser.git
+[submodule "repos/halftheopposite-tosios"]
+	path = repos/halftheopposite-tosios
+	url = https://github.com/halftheopposite/tosios.git
+[submodule "repos/knagaitsev-io-template"]
+	path = repos/knagaitsev-io-template
+	url = https://github.com/knagaitsev/io-template.git
+[submodule "repos/phaserjs-phaser"]
+	path = repos/phaserjs-phaser
+	url = https://github.com/phaserjs/phaser.git
+[submodule "repos/colyseus-colyseus"]
+	path = repos/colyseus-colyseus
+	url = https://github.com/colyseus/colyseus.git
+[submodule "repos/anza-xyz-kit"]
+	path = repos/anza-xyz-kit
+	url = https://github.com/anza-xyz/kit.git
+[submodule "repos/anza-xyz-wallet-adapter"]
+	path = repos/anza-xyz-wallet-adapter
+	url = https://github.com/anza-xyz/wallet-adapter.git
+[submodule "repos/metaplex-foundation-mpl-token-metadata"]
+	path = repos/metaplex-foundation-mpl-token-metadata
+	url = https://github.com/metaplex-foundation/mpl-token-metadata.git
+[submodule "repos/solana-foundation-anchor"]
+	path = repos/solana-foundation-anchor
+	url = https://github.com/solana-foundation/anchor.git
+[submodule "repos/prisma-orm"]
+	path = repos/prisma-orm
+	url = https://github.com/prisma/orm.git
+[submodule "repos/graphify-labs-graphify"]
+	path = repos/graphify-labs-graphify
+	url = https://github.com/Graphify-Labs/graphify.git
+[submodule "repos/coderabbitai-skills"]
+	path = repos/coderabbitai-skills
+	url = https://github.com/coderabbitai/skills.git
