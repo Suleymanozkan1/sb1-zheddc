@@ -171,6 +171,11 @@ export function Characters() {
                   Stat points: <b style={{ color }}>{current.progress.statPoints}</b>
                 </span>
               </div>
+              {current.progress.statPoints < 1 && (
+                <p className="mb-3 text-xs text-slate-400">
+                  No stat points left. Each level gives 2 points — earn XP in the arena by defeating creatures and rivals, then come back to upgrade.
+                </p>
+              )}
               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                 {StatKey.map((k) => {
                   const lvl = current.progress!.upgrades[k];

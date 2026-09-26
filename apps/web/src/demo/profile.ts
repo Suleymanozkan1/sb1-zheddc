@@ -51,6 +51,8 @@ export interface DemoProfile {
   questDay: string;
   quests: Record<string, { progress: number; claimed: boolean }>;
   totals: { kills: number; npcKills: number; xp: number; matches: number };
+  /** Set once the starting stat points were granted (older demo profiles get them on load). */
+  headStart?: boolean;
 }
 
 const KEY = "ca.demo.profile";
@@ -73,7 +75,7 @@ const today = (): string => new Date().toISOString().slice(0, 10);
 const noUpgrades = (): Record<StatKey, number> => Object.fromEntries(StatKey.map((k) => [k, 0])) as Record<StatKey, number>;
 
 function newCharacter(): DemoCharacter {
-  return { id: uid(), xp: 0, level: 1, statPoints: 0, upgrades: noUpgrades() };
+  return { id: uid(), xp: 0, level: 1, statPoints: DEMO_START.statPoints, upgrades: noUpgrades() };
 }
 
 function freshProfile(): DemoProfile {
@@ -94,6 +96,7 @@ function freshProfile(): DemoProfile {
     questDay: today(),
     quests: {},
     totals: { kills: 0, npcKills: 0, xp: 0, matches: 0 },
+    headStart: true,
   };
 }
 
@@ -105,6 +108,11 @@ export function loadProfile(): DemoProfile | null {
     const raw = localStorage.getItem(KEY);
     const parsed = raw ? (JSON.parse(raw) as DemoProfile) : null;
     cache = parsed?.version === 1 ? parsed : null;
+    if (cache && !cache.headStart) {
+      for (const c of Object.values(cache.characters)) c.statPoints += DEMO_START.statPoints;
+      cache.headStart = true;
+      saveProfile(cache);
+    }
   } catch {
     cache = null;
   }

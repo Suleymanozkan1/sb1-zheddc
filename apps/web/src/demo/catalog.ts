@@ -2,7 +2,8 @@
 // limits from the database and config. The demo mirrors the seeded shop without crypto products.
 import type { ProductCategory, ProductGrant, Rarity } from "@cryptoarena/shared";
 
-export const DEMO_START = { gold: 5_000, gems: 2_000, slots: 60, potions: 5 } as const;
+/** Starting balances. Heroes also start with a few stat points so upgrades can be tried right away. */
+export const DEMO_START = { gold: 5_000, gems: 2_000, slots: 60, potions: 5, statPoints: 6 } as const;
 
 export interface DemoProduct {
   sku: string;
