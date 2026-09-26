@@ -20,6 +20,7 @@ import {
 import { Buttons, RARITY_COLORS, type Rarity } from "@cryptoarena/shared";
 import Phaser from "phaser";
 import { useApp } from "../lib/store";
+import { playAbility, type FxHost } from "./abilityFx";
 import { useHud, type MinimapDot } from "./hud";
 import { KeyboardMouseInput, TouchInput, isTouchDevice, type InputSource } from "./input";
 import type { ArenaLink } from "./net";
@@ -61,6 +62,9 @@ interface RemoteBody {
   lastY: number;
   walk: number;
   lastGhostAt: number;
+  /** Ability animations own the body's rotation / scale until these scene times. */
+  spinUntil: number;
+  poseUntil: number;
 }
 
 /** Hero sprite torso radius on its 160 px canvas; the sprite is scaled so the torso matches PLAYER_RADIUS. */
@@ -312,6 +316,8 @@ export class ArenaScene extends Phaser.Scene {
       lastY: y,
       walk: 0,
       lastGhostAt: 0,
+      spinUntil: 0,
+      poseUntil: 0,
     };
   }
 
@@ -541,10 +547,10 @@ export class ArenaScene extends Phaser.Scene {
     const moved = Math.hypot(x - b.lastX, y - b.lastY);
     b.lastX = x;
     b.lastY = y;
-    if (b.rotates) b.body.setRotation(b.aim);
+    if (b.rotates && this.time.now >= b.spinUntil) b.body.setRotation(b.aim);
     b.walk += moved * 0.09;
     const bob = moved > 0.3 ? Math.sin(b.walk) * 0.045 : Math.sin(this.time.now / 500) * 0.015;
-    b.body.setScale(b.baseScale * (1 + bob), b.baseScale * (1 - bob));
+    if (this.time.now >= b.poseUntil) b.body.setScale(b.baseScale * (1 + bob), b.baseScale * (1 - bob));
     if (b.hpTrail > b.hp) {
       b.hpTrail = Math.max(b.hp, b.hpTrail - Math.max(1, b.maxHp * 0.6 * (delta / 1000)));
       this.drawHp(b);
@@ -637,7 +643,12 @@ export class ArenaScene extends Phaser.Scene {
       const b = this.players.get(m.id);
       if (!b) return;
       if (m.kind === "melee") this.slash(b.container.x, b.container.y, m.aim, m.range, 0xffffff);
-      else if (m.kind === "skill" || m.kind === "ultimate") this.shockwave(b.container.x, b.container.y, Math.max(120, m.range), m.kind === "ultimate" ? 0xe879f9 : 0x22d3ee);
+      else if (m.kind === "skill" || m.kind === "ultimate") {
+        const cls = this.conn.state.players.get(m.id)?.cls;
+        const def = CHARACTERS.find((c) => c.key === cls);
+        if (def) playAbility(this.fxHost(), b, m.kind === "skill" ? def.skill : def.ultimate, m.kind, m.aim, m.id === me);
+        else this.shockwave(b.container.x, b.container.y, Math.max(120, m.range), m.kind === "ultimate" ? 0xe879f9 : 0x22d3ee);
+      }
     });
     this.conn.on("player_damage", (m) => {
       const target = this.players.get(m.targetId) ?? this.npcs.get(m.targetId);
@@ -695,6 +706,18 @@ export class ArenaScene extends Phaser.Scene {
   }
 
   // ───────────────────────── Effects ─────────────────────────
+
+  private fxHost(): FxHost {
+    return {
+      scene: this,
+      sparks: this.sparks,
+      embers: this.embers,
+      hq: this.hq,
+      shake: (ms, intensity) => {
+        if (useApp.getState().settings.screenShake) this.cameras.main.shake(ms, intensity);
+      },
+    };
+  }
 
   private floatText(x: number, y: number, text: string, color: string, size: number): void {
     const t = this.add.text(x + Phaser.Math.Between(-12, 12), y, text, { fontFamily: DISPLAY_FONT, fontSize: `${size}px`, color, stroke: "#000", strokeThickness: 4 }).setOrigin(0.5).setDepth(50);
