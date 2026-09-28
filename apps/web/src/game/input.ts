@@ -148,6 +148,4 @@ export class TouchInput implements InputSource {
   }
 }
 
-export function isTouchDevice(): boolean {
-  return typeof window !== "undefined" && ("ontouchstart" in window || navigator.maxTouchPoints > 0) && window.matchMedia("(pointer: coarse)").matches;
-}
+export { isTouchDevice } from "../lib/device";

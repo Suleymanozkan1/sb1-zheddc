@@ -61,12 +61,14 @@ export function GameView() {
       // Canvas text needs the web fonts ready before it is rasterized.
       await Promise.race([document.fonts.load('700 12px "Orbitron"'), new Promise((r) => setTimeout(r, 1500))]).catch(() => undefined);
       if (cancelled) return;
+      // The lightweight renderer (phones) skips antialiasing; bloom/particles follow the same setting.
+      const hq = useApp.getState().settings.highQuality;
       game = new Phaser.Game({
         type: Phaser.WEBGL,
         parent: container.current!,
         backgroundColor: "#05060f",
         scale: { mode: Phaser.Scale.RESIZE, width: "100%", height: "100%" },
-        render: { antialias: true, powerPreference: "high-performance" },
+        render: { antialias: hq, powerPreference: "high-performance", roundPixels: !hq },
         fps: { target: 60 },
         scene: [],
       });
@@ -102,7 +104,7 @@ export function GameView() {
 
   return (
     <div className="fixed inset-0 bg-[#05060f]">
-      <div ref={container} className="absolute inset-0" />
+      <div ref={container} className="absolute inset-0 touch-none" />
       {ready && <Hud onLeave={() => void leave()} touch={touch} />}
       {!ready && !error && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-cyan-300">

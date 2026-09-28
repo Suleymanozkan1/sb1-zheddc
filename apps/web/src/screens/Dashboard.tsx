@@ -79,7 +79,7 @@ export function Dashboard() {
                 ? t("Timed match (3 min) against bots. Highest score wins.")
                 : t("Timed match (10 min). Highest score wins. Top 3 earn performance-based tournament rewards.")}
           </p>
-          <div className="relative grid grid-cols-3 gap-2 text-[11px] text-slate-400">
+          <div className="relative grid grid-cols-1 gap-1 text-center text-[11px] text-slate-400 sm:grid-cols-3 sm:gap-2 sm:text-left">
             <span>{t("WASD move · Mouse aim")}</span>
             <span>{t("Click attack · Space dash")}</span>
             <span>{t("Q skill · R ultimate · E loot · F potion")}</span>

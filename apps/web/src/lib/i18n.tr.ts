@@ -275,6 +275,7 @@ export const TR_UI: Record<string, string> = {
   "Quest complete: {name}": "Görev tamamlandı: {name}",
   "Quest complete: {name} — claim it in Quests": "Görev tamamlandı: {name} — ödülü Görevler'den al",
   "MATCH STARTED — FIGHT!": "MAÇ BAŞLADI — SAVAŞ!",
+  "Drag left side to move · Hold right side to aim & attack": "Sol tarafı sürükleyerek hareket et · Sağ tarafa basılı tutarak nişan al ve saldır",
 
   // Selling, locks and the stash
   "Inventory {used} / {slots} · Stash {stashUsed} / {stashSlots}": "Envanter {used} / {slots} · Depo {stashUsed} / {stashSlots}",
