@@ -3,7 +3,7 @@ import { Button, Panel, Spinner, Stat, Table, formatToken, shortAddress } from "
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { VersionedTransaction } from "@solana/web3.js";
 import { getBase64Encoder } from "@solana/kit";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Page } from "../components/Layout";
 import { api, newKey } from "../lib/api";
 import { errorMessage, useApp } from "../lib/store";
@@ -27,6 +27,14 @@ export function Wallet() {
   const [withdrawTo, setWithdrawTo] = useState("");
   const [busy, setBusy] = useState<"deposit" | "withdraw" | null>(null);
   const [withdrawKey, setWithdrawKey] = useState(newKey());
+  // Stops the deposit verification loop once the screen is left.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   if (!me) return null;
   const w = info.data;
@@ -59,7 +67,9 @@ export function Wallet() {
       }
       setDepositStatus(t("Waiting for finalization on-chain…"));
       for (let i = 0; i < 40; i++) {
+        if (!mounted.current) return;
         const res = await api.verifyDeposit(prep.depositId, signature);
+        if (!mounted.current) return;
         if (res.status === "CREDITED") {
           toast("success", t("Deposit of {amount} {symbol} credited", { amount: fmt(res.deposit.amount), symbol: sym }));
           setDepositStatus(null);
@@ -74,8 +84,10 @@ export function Wallet() {
       toast("error", errorMessage(err));
       setDepositStatus(null);
     } finally {
-      setBusy(null);
-      void info.reload();
+      if (mounted.current) {
+        setBusy(null);
+        void info.reload();
+      }
     }
   };
 

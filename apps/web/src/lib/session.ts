@@ -1,4 +1,5 @@
 import { api } from "./api";
+import { t as tNow } from "./i18n";
 import { errorMessage, useApp } from "./store";
 
 /**
@@ -10,7 +11,7 @@ export async function signOut(): Promise<void> {
   try {
     await api.logout();
   } catch (err) {
-    toast("error", `Could not sign out: ${errorMessage(err)}`);
+    toast("error", tNow("Could not sign out: {error}", { error: errorMessage(err) }));
     return;
   }
   setMe(null);

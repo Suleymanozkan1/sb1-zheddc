@@ -3,6 +3,7 @@ import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { getBase58Decoder } from "@solana/kit";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
+import { useT } from "../lib/i18n";
 import { errorMessage, useApp } from "../lib/store";
 
 /**
@@ -13,13 +14,14 @@ export function useWalletAuth() {
   const wallet = useWallet();
   const modal = useWalletModal();
   const { setMe, toast } = useApp();
+  const t = useT();
   const [busy, setBusy] = useState(false);
   const pending = useRef<"LOGIN" | "LINK_WALLET" | null>(null);
 
   const sign = useCallback(
     async (purpose: "LOGIN" | "LINK_WALLET") => {
       if (!wallet.publicKey || !wallet.signMessage) {
-        toast("error", "This wallet does not support message signing");
+        toast("error", t("This wallet does not support message signing"));
         return;
       }
       setBusy(true);
@@ -30,7 +32,7 @@ export function useWalletAuth() {
         const signature = getBase58Decoder().decode(sig);
         const me = purpose === "LOGIN" ? await api.verify(address, nonce, signature) : await api.linkWallet(address, nonce, signature);
         setMe(me);
-        toast("success", purpose === "LOGIN" ? "Wallet connected — welcome!" : "Wallet linked to your account");
+        toast("success", purpose === "LOGIN" ? t("Wallet connected — welcome!") : t("Wallet linked to your account"));
       } catch (err) {
         toast("error", errorMessage(err));
       } finally {
@@ -38,7 +40,7 @@ export function useWalletAuth() {
         pending.current = null;
       }
     },
-    [wallet, setMe, toast],
+    [wallet, setMe, toast, t],
   );
 
   // Continue the flow once the user picked a wallet in the modal.

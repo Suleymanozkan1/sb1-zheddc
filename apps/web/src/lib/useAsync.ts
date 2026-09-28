@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { errorMessage } from "./store";
 
 export function useAsync<T>(fn: () => Promise<T>, deps: unknown[] = []) {
@@ -7,15 +7,21 @@ export function useAsync<T>(fn: () => Promise<T>, deps: unknown[] = []) {
   const [loading, setLoading] = useState(true);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const run = useCallback(fn, deps);
+  // Only the latest call may update state, so a slow earlier response cannot overwrite a newer one.
+  const seq = useRef(0);
   const reload = useCallback(async () => {
+    const mine = ++seq.current;
     setLoading(true);
     try {
-      setData(await run());
-      setError(null);
+      const v = await run();
+      if (mine === seq.current) {
+        setData(v);
+        setError(null);
+      }
     } catch (err) {
-      setError(errorMessage(err));
+      if (mine === seq.current) setError(errorMessage(err));
     } finally {
-      setLoading(false);
+      if (mine === seq.current) setLoading(false);
     }
   }, [run]);
   useEffect(() => {

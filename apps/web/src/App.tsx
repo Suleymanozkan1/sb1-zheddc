@@ -1,7 +1,9 @@
 import { Spinner } from "@cryptoarena/ui";
 import { Suspense, lazy, useEffect, useState } from "react";
 import { Toasts, TopBar } from "./components/Layout";
+import { loadProfile } from "./demo/profile";
 import { api } from "./lib/api";
+import { DEMO_ONLY, isDemo, setDemo } from "./lib/demo";
 import { useApp } from "./lib/store";
 import { Characters } from "./screens/Characters";
 import { Dashboard } from "./screens/Dashboard";
@@ -21,6 +23,8 @@ export function App() {
   const [booting, setBooting] = useState(true);
 
   useEffect(() => {
+    // A demo flag whose profile is missing or corrupt would leave the live API unreachable.
+    if (isDemo() && !DEMO_ONLY && !loadProfile()) setDemo(false);
     api
       .me()
       .then((m) => {

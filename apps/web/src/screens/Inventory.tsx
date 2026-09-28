@@ -16,6 +16,9 @@ function fmtStat(k: string, v: number): string {
 
 type Tab = "inventory" | "stash";
 
+/** Most ids one sell request may carry (the server's SELL_MAX_ITEMS default). */
+const SELL_BATCH = 100;
+
 /** Items that bulk selling may include: unlocked, unequipped, sellable gear (never consumables). */
 function bulkCandidate(i: InventoryItemDto, maxRarity: Rarity): boolean {
   return i.sellValue !== null && !i.locked && !i.equipped && i.item.type !== "CONSUMABLE" && Rarity.indexOf(i.item.rarity) <= Rarity.indexOf(maxRarity);
@@ -72,9 +75,29 @@ export function Inventory() {
     run(
       plan.items.length === 1 ? `s${plan.items[0]!.id}` : "bulk",
       async () => {
-        const res = await api.sellItems(plan.items.map((i) => i.id));
+        // The server (and demo) reject more than SELL_BATCH ids per request, so large bulk sells
+        // go out as sequential batches, each with its own idempotency key.
+        const ids = plan.items.map((i) => i.id);
+        let sold = 0;
+        let gold = 0n;
+        let balances: Parameters<typeof setBalances>[0] | undefined;
+        try {
+          for (let i = 0; i < ids.length; i += SELL_BATCH) {
+            const res = await api.sellItems(ids.slice(i, i + SELL_BATCH));
+            sold += res.sold;
+            gold += BigInt(res.gold);
+            balances = res.balances;
+          }
+        } catch (err) {
+          // Earlier batches went through: show their result before reporting the failure.
+          if (balances) {
+            setBalances(balances);
+            await inv.reload();
+          }
+          throw err;
+        }
         setConfirm(null);
-        return res;
+        return { sold, gold: gold.toString(), balances };
       },
       plan.items.length === 1 ? t("Sold {name} for {gold} gold", { name: name(plan.items[0]!), gold: formatInt(plan.gold) }) : t("Sold {n} items for {gold} gold", { n: plan.items.length, gold: formatInt(plan.gold) }),
     );

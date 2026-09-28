@@ -19,7 +19,7 @@ import type { ArenaLink, EntityCollection, StateCallbacks } from "../game/net";
 import { prefersLowQuality } from "../lib/device";
 import type { ArenaStateView, LootView, NpcView, PlayerView, ProjectileView, ResourceView } from "../game/types";
 import { DEMO_PRODUCTS, DEMO_QUESTS, DEMO_RIVALS } from "./catalog";
-import { DemoError, addCharacterXp, consumeItem, findCharacter, grantItem, itemDef, loadForMatch, lootCatalog, recordQuestProgress, requireProfile, saveProfile, spend } from "./profile";
+import { DemoError, addCharacterXp, consumeItem, countItem, findCharacter, grantItem, itemDef, loadForMatch, lootCatalog, recordQuestProgress, requireProfile, saveProfile, spend } from "./profile";
 
 const TICK_RATE = 60;
 /** Phones run the whole simulation next to the renderer, so they get a lighter world. */
@@ -29,6 +29,8 @@ const NPC_DENSITY = LIGHT ? 0.6 : 1;
 const RANKED_COUNTDOWN_MS = 10_000;
 const RANKED_MATCH_MS = 180_000;
 const SELF = "me";
+/** Same potion cooldown the game server enforces. */
+const POTION_COOLDOWN_MS = 5_000;
 
 type ViewOf = { players: PlayerView; npcs: NpcView; projectiles: ProjectileView; loot: LootView; resources: ResourceView };
 type Handler = (msg: unknown) => void;
@@ -86,6 +88,7 @@ export class DemoArena implements ArenaLink {
   private progress = emptyProgress();
   private goldTotal = 0;
   private potions: number;
+  private nextPotionAt = 0;
   private readonly joinedAt = Date.now();
   private closed = false;
 
@@ -142,17 +145,22 @@ export class DemoArena implements ArenaLink {
     this.leaveHandlers.push(handler);
   }
 
-  on<K extends keyof ServerMessages>(type: K, handler: (msg: ServerMessages[K]) => void): void {
+  on<K extends keyof ServerMessages>(type: K, handler: (msg: ServerMessages[K]) => void): () => void {
+    const h = handler as Handler;
     const list = this.listeners.get(type) ?? [];
-    list.push(handler as Handler);
+    list.push(h);
     this.listeners.set(type, list);
     for (let i = 0; i < this.early.length; i++) {
       const e = this.early[i]!;
       if (e.type === type) {
         this.early.splice(i--, 1);
-        (handler as Handler)(e.msg);
+        h(e.msg);
       }
     }
+    return () => {
+      const current = this.listeners.get(type);
+      if (current) this.listeners.set(type, current.filter((x) => x !== h));
+    };
   }
 
   callbacks(): StateCallbacks {
@@ -468,7 +476,7 @@ export class DemoArena implements ArenaLink {
         const row = grantItem(profile, loot.itemKey, 1);
         saveProfile(profile);
         this.sim.finishPickup(loot.id);
-        if (loot.itemKey === "potion_health") this.potions++;
+        if (loot.itemKey === "potion_health") this.potions = countItem(profile, "potion_health");
         this.emit("item_pickup", { id: loot.id, itemKey: loot.itemKey, name: loot.name, rarity: loot.rarity, quantity: row.quantity });
         this.sendSelfStats();
       } catch (err) {
@@ -489,12 +497,13 @@ export class DemoArena implements ArenaLink {
     // Gold earned this session is saved first so it can be spent at the merchant.
     this.flush(false);
     try {
-      const profile = requireProfile();
+      // Work on a copy so a failed grant never leaves the gold spent in the cached profile.
+      const profile = structuredClone(requireProfile());
       spend(profile, product.currency, product.price);
       for (const g of product.grants) if (g.kind === "ITEM") grantItem(profile, g.itemKey, g.quantity);
       saveProfile(profile);
-      this.potions += 5;
-      this.notice("info", "Purchased 5 health potions");
+      this.potions = countItem(profile, "potion_health");
+      this.notice("info", "Health potions purchased");
       this.sendSelfStats();
     } catch (err) {
       this.notice("error", err instanceof DemoError ? err.message : "Purchase failed");
@@ -504,10 +513,12 @@ export class DemoArena implements ArenaLink {
   private drinkPotion(): void {
     const p = this.sim.players.get(SELF);
     if (!p?.alive) return;
+    if (performance.now() < this.nextPotionAt) return this.notice("warn", "Potion is on cooldown");
     const profile = requireProfile();
     if (this.potions <= 0 || !consumeItem(profile, "potion_health")) return this.notice("warn", "No potions left");
     saveProfile(profile);
-    this.potions--;
+    this.nextPotionAt = performance.now() + POTION_COOLDOWN_MS;
+    this.potions = countItem(profile, "potion_health");
     const fraction = itemDef("potion_health").metadata.fraction;
     this.sim.heal(p, typeof fraction === "number" ? fraction : 0.35);
     this.sendSelfStats();

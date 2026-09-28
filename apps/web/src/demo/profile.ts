@@ -17,6 +17,7 @@ import {
   type ItemDef,
 } from "@cryptoarena/game-core";
 import { EquipSlots, StatKey, type BalancesDto, type CharacterDto, type InventoryItemDto, type MeDto } from "@cryptoarena/shared";
+import { LocalizedError } from "../lib/i18n";
 import { DEMO_PRODUCTS, DEMO_QUESTS, DEMO_SELL_RATES, DEMO_STASH_SLOTS, DEMO_START, type DemoObjective } from "./catalog";
 
 interface DemoCharacter {
@@ -63,11 +64,12 @@ export interface DemoProfile {
 const KEY = "ca.demo.profile";
 const ITEMS: readonly ItemDef[] = buildItemCatalog();
 
-export class DemoError extends Error {}
+/** Demo rule violation; the message is an i18n key, with optional {placeholders} in `params`. */
+export class DemoError extends LocalizedError {}
 
 export function itemDef(key: string): ItemDef {
   const def = ITEMS.find((i) => i.key === key);
-  if (!def) throw new DemoError(`Unknown item ${key}`);
+  if (!def) throw new DemoError("Unknown item {key}", { key });
   return def;
 }
 
@@ -252,18 +254,23 @@ export function stashSlotsOf(p: DemoProfile): number {
   return p.stashSlots ?? DEMO_STASH_SLOTS;
 }
 
-/** Adds an item; returns the row. Throws when a new slot is needed and the inventory is full. */
+/**
+ * Adds an item; returns the row. Throws when a new slot is needed and the inventory is full, or
+ * when a stack would exceed its maximum (never silently drops part of the grant).
+ */
 export function grantItem(p: DemoProfile, itemKey: string, quantity: number): DemoInventoryRow {
   const def = itemDef(itemKey);
   if (def.stackable) {
     const row = p.inventory.find((r) => r.itemKey === itemKey && !r.inStash);
     if (row) {
-      row.quantity = Math.min(def.maxStack, row.quantity + quantity);
+      if (row.quantity + quantity > def.maxStack) throw new DemoError("You cannot carry more of that item");
+      row.quantity += quantity;
       return row;
     }
+    if (quantity > def.maxStack) throw new DemoError("You cannot carry more of that item");
   }
   if (usedSlots(p) >= p.slots) throw new DemoError("Inventory is full");
-  const row: DemoInventoryRow = { id: uid(), itemKey, quantity: def.stackable ? Math.min(def.maxStack, quantity) : 1, upgradeLevel: 0, equipped: false, equippedSlot: null, acquiredAt: new Date().toISOString() };
+  const row: DemoInventoryRow = { id: uid(), itemKey, quantity: def.stackable ? quantity : 1, upgradeLevel: 0, equipped: false, equippedSlot: null, acquiredAt: new Date().toISOString() };
   p.inventory.push(row);
   return row;
 }

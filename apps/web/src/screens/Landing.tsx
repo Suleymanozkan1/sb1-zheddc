@@ -73,6 +73,8 @@ export function Landing() {
             loading={guestBusy}
             onClick={async () => {
               setGuestBusy(true);
+              // A guest account uses the live API, never a leftover demo session.
+              setDemo(false);
               try {
                 setMe(await api.guest());
                 go("dashboard");

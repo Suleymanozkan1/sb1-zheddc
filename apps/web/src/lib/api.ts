@@ -69,7 +69,13 @@ async function request<T>(method: "GET" | "POST", path: string, body?: unknown, 
     if (await refreshSession()) return request<T>(method, path, body, false);
   }
   const text = await res.text();
-  const json = text ? (JSON.parse(text) as unknown) : null;
+  let json: unknown;
+  try {
+    json = text ? (JSON.parse(text) as unknown) : null;
+  } catch {
+    // A proxy error page or truncated body: fall back to the status-based message below.
+    json = null;
+  }
   if (!res.ok) {
     const err = (json as { error?: { code?: string; message?: string } } | null)?.error;
     throw new ApiError(res.status, err?.code ?? "ERROR", err?.message ?? `Request failed (${res.status})`);
