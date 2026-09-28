@@ -117,8 +117,8 @@ export const envSchema = z.object({
   SELL_CONSUMABLE_BPS: z.coerce.number().int().min(0).max(10_000).default(2_500),
   /** Share of the gold spent on +N upgrades that selling returns (bps). Must stay below 100 %. */
   SELL_UPGRADE_REFUND_BPS: z.coerce.number().int().min(0).max(9_000).default(2_500),
-  /** Maximum items per (bulk) sell request. */
-  SELL_MAX_ITEMS: z.coerce.number().int().min(1).max(500).default(100),
+  /** Maximum items per (bulk) sell request. At least 100: the web client sends batches of 100. */
+  SELL_MAX_ITEMS: z.coerce.number().int().min(100).max(500).default(100),
   BLOCKED_COUNTRIES: z.string().default(""),
   MIN_AGE: z.coerce.number().int().min(0).default(18),
   REQUIRE_KYC_FOR_WITHDRAWAL: bool.default(false),

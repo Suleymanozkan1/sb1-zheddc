@@ -73,6 +73,8 @@ async function request<T>(method: "GET" | "POST", path: string, body?: unknown, 
   try {
     json = text ? (JSON.parse(text) as unknown) : null;
   } catch {
+    // A successful response must be valid JSON; never hand `null` to a caller as its result.
+    if (res.ok) throw new ApiError(res.status, "BAD_RESPONSE", "Invalid response from server");
     // A proxy error page or truncated body: fall back to the status-based message below.
     json = null;
   }

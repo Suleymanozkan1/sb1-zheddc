@@ -174,7 +174,8 @@ export class Persistence {
   }
 
   countPotions(userId: string) {
-    return countItem(this.prisma, userId, "potion_health");
+    // Through the per-user queue so the count cannot overtake a pending buy or consume.
+    return this.enqueue(userId, () => countItem(this.prisma, userId, "potion_health"));
   }
 
   consumePotion(userId: string) {

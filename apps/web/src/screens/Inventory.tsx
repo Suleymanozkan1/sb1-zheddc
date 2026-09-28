@@ -16,7 +16,7 @@ function fmtStat(k: string, v: number): string {
 
 type Tab = "inventory" | "stash";
 
-/** Most ids one sell request may carry (the server's SELL_MAX_ITEMS default). */
+/** Most ids one sell request may carry (SELL_MAX_ITEMS is validated to be at least this on the server). */
 const SELL_BATCH = 100;
 
 /** Items that bulk selling may include: unlocked, unequipped, sellable gear (never consumables). */
@@ -93,6 +93,8 @@ export function Inventory() {
           if (balances) {
             setBalances(balances);
             await inv.reload();
+            // The plan holds ids that are already sold; a retry must start from the fresh inventory.
+            setConfirm(null);
           }
           throw err;
         }

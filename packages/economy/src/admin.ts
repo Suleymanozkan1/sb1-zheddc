@@ -7,6 +7,7 @@ import { writeAudit } from "./audit";
 import { AppError } from "./errors";
 import { grantItem } from "./inventory";
 import { postJournal, transfer } from "./ledger";
+import { lockUser } from "./locks";
 import { fundRewardPool } from "./rewards";
 
 export const ROLE_RANK: Record<AdminRole, number> = { SUPPORT: 1, MODERATOR: 2, ADMIN: 3, SUPER_ADMIN: 4 };
@@ -27,6 +28,8 @@ function requireRole(actor: AdminActor, min: AdminRole): void {
 
 export async function setUserStatus(tx: Tx, logger: Logger, actor: AdminActor, userId: string, status: "ACTIVE" | "SUSPENDED" | "BANNED", reason: string) {
   requireRole(actor, "MODERATOR");
+  // Serialise with the user's economy transactions, which check the status under the same lock.
+  await lockUser(tx, userId);
   const before = await tx.user.findUnique({ where: { id: userId } });
   if (!before) throw new AppError("NOT_FOUND", "User not found");
   const target = await tx.adminUser.findUnique({ where: { userId } });
