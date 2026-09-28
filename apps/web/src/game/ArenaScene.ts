@@ -97,7 +97,13 @@ export class ArenaScene extends Phaser.Scene {
   private readonly resources = new Map<string, Phaser.GameObjects.Container>();
   private hq = true;
   private readonly npcKinds = new Map<string, string>();
-  private readonly canopies: Phaser.GameObjects.Image[] = [];
+  private readonly canopies: { img: Phaser.GameObjects.Image; base: number; phase: number; speed: number }[] = [];
+  /** Static world decoration in a coarse grid, so only what the camera sees is rendered. */
+  private readonly propCells = new Map<number, { obj: Phaser.GameObjects.Components.Visible; x: number; y: number; r: number }[]>();
+  private readonly shownProps = new Set<Phaser.GameObjects.Components.Visible>();
+  private lastCullX = Number.NaN;
+  private lastCullY = Number.NaN;
+  private lastCullZoom = 0;
   private sparks!: Phaser.GameObjects.Particles.ParticleEmitter;
   private embers!: Phaser.GameObjects.Particles.ParticleEmitter;
   private trails!: Phaser.GameObjects.Particles.ParticleEmitter;
@@ -199,7 +205,7 @@ export class ArenaScene extends Phaser.Scene {
         const region = regionAt(o.x, o.y, size);
         const key = treeTextureFor(region.key, o.r, i);
         const isTree = key.startsWith("tree");
-        this.add
+        const shadow = this.add
           .image(o.x + o.r * 0.25, o.y + o.r * 0.35, "shadow")
           .setScale((o.r * 2.6) / 128, (o.r * 2.2) / 64)
           .setDepth(1)
@@ -209,19 +215,24 @@ export class ArenaScene extends Phaser.Scene {
           .setScale((o.r * (isTree ? 2.5 : 2.15)) / 256)
           .setRotation((i * 2.399) % (Math.PI * 2))
           .setDepth(isTree ? 14 : 2);
+        this.addProp(shadow, o.x, o.y, o.r * 1.6);
+        this.addProp(img, o.x, o.y, o.r * 1.4);
         if (isTree) {
           // Canopies sway and sit above characters; they fade when someone walks under them.
+          // The sway is driven from update() for on-screen trees only (no per-tree tweens).
           img.setAlpha(0.95);
-          this.tweens.add({ targets: img, angle: img.angle + 3, yoyo: true, repeat: -1, duration: 2600 + (i % 7) * 300, ease: "Sine.easeInOut" });
-          this.canopies.push(img);
+          this.canopies.push({ img, base: img.rotation, phase: i * 0.7, speed: 1 / (2600 + (i % 7) * 300) });
         }
       } else {
-        this.add
+        const shadow = this.add
           .image(o.x + o.w / 2 + 10, o.y + o.h / 2 + 14, "shadow")
           .setScale((o.w * 1.3) / 128, (o.h * 1.6) / 64)
           .setDepth(1)
           .setAlpha(0.7);
-        this.add.tileSprite(o.x + o.w / 2, o.y + o.h / 2, o.w, o.h, "wall_tile").setDepth(2);
+        const wall = this.add.tileSprite(o.x + o.w / 2, o.y + o.h / 2, o.w, o.h, "wall_tile").setDepth(2);
+        const reach = Math.hypot(o.w, o.h) / 2 + 20;
+        this.addProp(shadow, o.x + o.w / 2, o.y + o.h / 2, reach);
+        this.addProp(wall, o.x + o.w / 2, o.y + o.h / 2, reach);
         const accent = REGION_STYLE[regionAt(o.x + o.w / 2, o.y + o.h / 2, size).key]?.accent ?? 0xa855f7;
         walls.fillStyle(0xffffff, 0.08).fillRect(o.x, o.y, o.w, 4);
         walls.lineStyle(6, accent, 0.15).strokeRect(o.x - 2, o.y - 2, o.w + 4, o.h + 4);
@@ -279,6 +290,57 @@ export class ArenaScene extends Phaser.Scene {
         blendMode: Phaser.BlendModes.ADD,
       })
       .setDepth(10);
+  }
+
+  // ───────────────────────── Culling ─────────────────────────
+
+  private static readonly CELL = 512;
+
+  private cellKey(cx: number, cy: number): number {
+    return cy * 4096 + cx;
+  }
+
+  /** Registers a static decoration; it starts hidden and is shown while near the camera. */
+  private addProp(obj: Phaser.GameObjects.Components.Visible, x: number, y: number, r: number): void {
+    const cx = Math.floor(x / ArenaScene.CELL);
+    const cy = Math.floor(y / ArenaScene.CELL);
+    const key = this.cellKey(cx, cy);
+    const list = this.propCells.get(key) ?? [];
+    list.push({ obj, x, y, r });
+    this.propCells.set(key, list);
+    obj.setVisible(false);
+  }
+
+  /**
+   * Shows only decorations inside the camera view (plus a margin). The map holds hundreds of
+   * trees, rocks and walls; skipping the off-screen ones keeps phones at a playable frame rate.
+   */
+  private cullWorld(force = false): void {
+    const view = this.cameras.main.worldView;
+    const zoom = this.cameras.main.zoom;
+    if (!force && Math.abs(view.centerX - this.lastCullX) < 96 && Math.abs(view.centerY - this.lastCullY) < 96 && zoom === this.lastCullZoom) return;
+    this.lastCullX = view.centerX;
+    this.lastCullY = view.centerY;
+    this.lastCullZoom = zoom;
+    const margin = 320;
+    const minX = view.x - margin;
+    const minY = view.y - margin;
+    const maxX = view.right + margin;
+    const maxY = view.bottom + margin;
+    const next = new Set<Phaser.GameObjects.Components.Visible>();
+    const c = ArenaScene.CELL;
+    // Props are bucketed by centre; widen by one cell so large ones straddling a border still show.
+    for (let cy = Math.floor(minY / c) - 1; cy <= Math.floor(maxY / c) + 1; cy++) {
+      for (let cx = Math.floor(minX / c) - 1; cx <= Math.floor(maxX / c) + 1; cx++) {
+        for (const p of this.propCells.get(this.cellKey(cx, cy)) ?? []) {
+          if (p.x + p.r >= minX && p.x - p.r <= maxX && p.y + p.r >= minY && p.y - p.r <= maxY) next.add(p.obj);
+        }
+      }
+    }
+    for (const obj of this.shownProps) if (!next.has(obj)) obj.setVisible(false);
+    for (const obj of next) if (!this.shownProps.has(obj)) obj.setVisible(true);
+    this.shownProps.clear();
+    for (const obj of next) this.shownProps.add(obj);
   }
 
   // ───────────────────────── State binding ─────────────────────────
@@ -794,11 +856,17 @@ export class ArenaScene extends Phaser.Scene {
       this.errorY *= 0.85;
       me.container.setPosition(this.mover.x + this.errorX, this.mover.y + this.errorY);
       this.animate(me, delta, this.mover.dashRemainingMs > 0);
-      // Canopies near the local player turn translucent so they never hide the fight.
+      this.cullWorld();
+      // On-screen canopies sway; those near the local player turn translucent so they never hide the fight.
+      const t = this.time.now;
       for (const c of this.canopies) {
-        const r = c.displayWidth * 0.5;
-        const inside = (c.x - me.container.x) ** 2 + (c.y - me.container.y) ** 2 < r * r;
-        c.setAlpha(Phaser.Math.Linear(c.alpha, inside ? 0.3 : 0.95, 0.15));
+        const img = c.img;
+        if (!img.visible) continue;
+        img.setRotation(c.base + Math.sin(t * c.speed * Math.PI + c.phase) * 0.026);
+        const r = img.displayWidth * 0.5;
+        const inside = (img.x - me.container.x) ** 2 + (img.y - me.container.y) ** 2 < r * r;
+        const target = inside ? 0.3 : 0.95;
+        if (Math.abs(img.alpha - target) > 0.01) img.setAlpha(Phaser.Math.Linear(img.alpha, target, 0.15));
       }
     }
 

@@ -232,6 +232,17 @@ pnpm --filter @cryptoarena/web build && pnpm --filter @cryptoarena/web preview
 
 The Phaser bundle is lazy-loaded when entering the arena. `VITE_GAME_URL` points to the Colyseus server.
 
+**Android app.** `apps/mobile` wraps the offline demo in a Capacitor Android app (full screen, screen kept on).
+Requirements: JDK 21 and the Android SDK (platform 36) with `ANDROID_HOME` set. `pnpm --filter @cryptoarena/mobile apk`
+builds the demo bundle, syncs it into `apps/mobile/android` and produces
+`apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk` (debug-signed, for sideloading).
+`pnpm --filter @cryptoarena/mobile assets` regenerates the launcher icons and splash screens. A Play Store release
+needs a release keystore configured in `android/app/build.gradle` and `pnpm --filter @cryptoarena/mobile apk:release`.
+
+**Phones.** Touch devices get a compact HUD with thumb buttons (dash, skill, ultimate, potion, loot/buy) and the
+lightweight renderer by default (no bloom, antialiasing or dense particles; toggle in Settings). Static world
+decoration is culled to the camera view.
+
 **Languages.** The client ships in English and Turkish (EN/TR toggle in the top bar and on the landing page,
 plus Settings → Language; defaults to the browser language and is remembered). UI strings use the English text
 as the key (`apps/web/src/lib/i18n.ts`); game content (heroes, abilities, creatures, items, products, quests) is

@@ -1,5 +1,6 @@
 import type { BalancesDto, MatchMode, MeDto } from "@cryptoarena/shared";
 import { create } from "zustand";
+import { prefersLowQuality } from "./device";
 import { t, type Lang } from "./i18n";
 
 export type Screen = "landing" | "dashboard" | "game" | "characters" | "inventory" | "shop" | "wallet" | "leaderboard" | "quests" | "settings";
@@ -38,7 +39,7 @@ interface AppState {
 }
 
 function loadSettings(): Settings {
-  const fallback: Settings = { showFps: false, screenShake: true, showDamageNumbers: true, highQuality: true };
+  const fallback: Settings = { showFps: false, screenShake: true, showDamageNumbers: true, highQuality: !prefersLowQuality() };
   try {
     const raw = localStorage.getItem("ca.settings");
     return raw ? { ...fallback, ...(JSON.parse(raw) as Partial<Settings>) } : fallback;

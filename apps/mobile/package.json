@@ -1,0 +1,20 @@
+{
+  "name": "@cryptoarena/mobile",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Android app (Capacitor) that bundles the offline demo of the web client.",
+  "scripts": {
+    "build:web": "VITE_DEMO_ONLY=true pnpm --filter @cryptoarena/web exec vite build --outDir ../mobile/www --emptyOutDir && find www -name '*.map' -delete",
+    "sync": "pnpm build:web && cap sync android",
+    "apk": "pnpm sync && cd android && ./gradlew assembleDebug",
+    "apk:release": "pnpm sync && cd android && ./gradlew assembleRelease",
+    "assets": "node scripts/generate-assets.mjs"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/core": "^8.5.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.5.2"
+  }
+}

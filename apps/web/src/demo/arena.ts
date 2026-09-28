@@ -16,12 +16,16 @@ import {
 } from "@cryptoarena/game-core";
 import type { ClientMessages, MatchMode, MatchStanding, PlayerMoveInput, ServerMessages } from "@cryptoarena/shared";
 import type { ArenaLink, EntityCollection, StateCallbacks } from "../game/net";
+import { prefersLowQuality } from "../lib/device";
 import type { ArenaStateView, LootView, NpcView, PlayerView, ProjectileView, ResourceView } from "../game/types";
 import { DEMO_PRODUCTS, DEMO_QUESTS, DEMO_RIVALS } from "./catalog";
 import { DemoError, addCharacterXp, consumeItem, findCharacter, grantItem, itemDef, loadForMatch, lootCatalog, recordQuestProgress, requireProfile, saveProfile, spend } from "./profile";
 
 const TICK_RATE = 60;
-const BOTS = 8;
+/** Phones run the whole simulation next to the renderer, so they get a lighter world. */
+const LIGHT = prefersLowQuality();
+const BOTS = LIGHT ? 6 : 8;
+const NPC_DENSITY = LIGHT ? 0.6 : 1;
 const RANKED_COUNTDOWN_MS = 10_000;
 const RANKED_MATCH_MS = 180_000;
 const SELF = "me";
@@ -91,7 +95,7 @@ export class DemoArena implements ArenaLink {
     const loaded = loadForMatch(requireProfile(), userCharacterId);
     this.potions = loaded.potions;
     const seed = Math.floor(Math.random() * 1_000_000);
-    this.sim = new ArenaSimulation({ seed, worldSize: WORLD_SIZE, tickRate: TICK_RATE, npcDensity: 1, pvp: true, lootCatalog: lootCatalog() }, this.simEvents());
+    this.sim = new ArenaSimulation({ seed, worldSize: WORLD_SIZE, tickRate: TICK_RATE, npcDensity: NPC_DENSITY, pvp: true, lootCatalog: lootCatalog() }, this.simEvents());
     this.state.mode = mode;
     this.state.mapSeed = seed;
     this.state.phase = mode === "RANKED" ? "countdown" : "running";
@@ -297,7 +301,8 @@ export class DemoArena implements ArenaLink {
       if (this.assign(v, next)) this.changed(v);
     }
     for (const n of this.sim.npcs.values()) {
-      if (!n.awake) continue;
+      // Static NPCs (chests) never wake up but can still take damage, so their HP must sync.
+      if (!n.awake && n.def.behavior !== "static") continue;
       const v = this.all.npcs.get(n.id);
       if (v && this.assign(v, { x: n.x, y: n.y, aim: n.aim, hp: Math.max(0, Math.round(n.hp)) }) && this.state.npcs.has(n.id)) this.changed(v);
     }

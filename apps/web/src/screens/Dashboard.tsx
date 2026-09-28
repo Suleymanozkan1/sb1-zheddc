@@ -60,7 +60,7 @@ export function Dashboard() {
         </Panel>
 
         {/* Center: PLAY */}
-        <section className="glass relative flex min-h-[420px] flex-col items-center justify-center gap-6 overflow-hidden p-6">
+        <section className="glass relative order-first flex min-h-[320px] flex-col items-center justify-center gap-6 overflow-hidden p-6 lg:order-none lg:min-h-[420px]">
           <div className="grid-bg absolute inset-0 opacity-60" />
           <div className="relative flex rounded-2xl bg-black/30 p-1">
             {(["CASUAL", "RANKED"] as const).map((m) => (
@@ -79,7 +79,7 @@ export function Dashboard() {
                 ? t("Timed match (3 min) against bots. Highest score wins.")
                 : t("Timed match (10 min). Highest score wins. Top 3 earn performance-based tournament rewards.")}
           </p>
-          <div className="relative grid grid-cols-3 gap-2 text-[11px] text-slate-400">
+          <div className="relative grid grid-cols-1 gap-1 text-center text-[11px] text-slate-400 sm:grid-cols-3 sm:gap-2 sm:text-left">
             <span>{t("WASD move · Mouse aim")}</span>
             <span>{t("Click attack · Space dash")}</span>
             <span>{t("Q skill · R ultimate · E loot · F potion")}</span>

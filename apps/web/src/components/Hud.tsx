@@ -5,6 +5,7 @@ import { REGION_STYLE } from "../game/art/world";
 import { useHud } from "../game/hud";
 import type { TouchInput } from "../game/input";
 import { useApp } from "../lib/store";
+import { useCompact } from "../lib/device";
 import { useT, useTc } from "../lib/i18n";
 
 const css = (n: number): string => `#${n.toString(16).padStart(6, "0")}`;
@@ -105,7 +106,7 @@ function AbilitySlot({ icon, keyLabel, name, readyAt, now, color, count }: { ico
 
 // ───────────────────────── Minimap ─────────────────────────
 
-function Minimap() {
+function Minimap({ compact = false }: { compact?: boolean }) {
   const { minimap, worldSize, mapSeed, region, regionKey } = useHud();
   const ref = useRef<HTMLCanvasElement>(null);
   const base = useRef<HTMLCanvasElement | null>(null);
@@ -199,7 +200,7 @@ function Minimap() {
   return (
     <div className="hud-panel p-2" style={{ ["--hud-accent" as string]: accent }}>
       <div className="relative">
-        <canvas ref={ref} width={200} height={200} className="block h-[130px] w-[130px] rounded-full md:h-[180px] md:w-[180px]" style={{ boxShadow: `0 0 0 2px ${accent}55, 0 0 24px ${accent}33` }} />
+        <canvas ref={ref} width={200} height={200} className={cx("block rounded-full", compact ? "h-[92px] w-[92px]" : "h-[130px] w-[130px] md:h-[180px] md:w-[180px]")} style={{ boxShadow: `0 0 0 2px ${accent}55, 0 0 24px ${accent}33` }} />
         <span className="absolute top-0 left-1/2 -translate-x-1/2 font-display text-[10px] font-bold text-slate-300">N</span>
       </div>
       <div className="mt-1 text-center font-display text-[10px] font-bold tracking-[0.2em] uppercase" style={{ color: accent }}>
@@ -226,9 +227,9 @@ function RegionBanner() {
   const def = REGIONS.find((r) => r.key === shown.key);
   const accent = css(REGION_STYLE[shown.key]?.accent ?? 0x22d3ee);
   return (
-    <div key={shown.n} className="hud-banner absolute top-28 left-1/2 text-center">
+    <div key={shown.n} className="hud-banner absolute top-20 left-1/2 text-center md:top-28">
       <div className="font-display text-[10px] font-bold tracking-[0.5em] text-slate-400">{t("TIER {n} REGION", { n: def?.tier ?? 1 })}</div>
-      <div className="font-display text-3xl font-black uppercase" style={{ color: accent, textShadow: `0 0 18px ${accent}, 0 2px 0 #000` }}>
+      <div className="font-display text-xl font-black uppercase md:text-3xl" style={{ color: accent, textShadow: `0 0 18px ${accent}, 0 2px 0 #000` }}>
         {tc("region", shown.key, shown.name)}
       </div>
       <div className="mx-auto mt-1 h-px w-64" style={{ background: `linear-gradient(90deg, transparent, ${accent}, transparent)` }} />
@@ -249,6 +250,9 @@ export function Hud({ onLeave, touch }: { onLeave: () => void; touch: TouchInput
   const hpColor = hpPct > 0.5 ? "#4ade80" : hpPct > 0.25 ? "#facc15" : "#f43f5e";
   const respawnIn = Math.max(0, Math.ceil((h.respawnAt - now) / 1000));
   const rank = h.scoreboard.findIndex((p) => p.name === h.selfName) + 1;
+  const compact = useCompact();
+  /** The touch control hint shows for the first seconds of a session only. */
+  const [hintUntil] = useState(() => performance.now() + 8_000);
   const t = useT();
   const tc = useTc();
   const heroDef = CHARACTERS.find((c) => c.key === h.selfClass);
@@ -262,8 +266,22 @@ export function Hud({ onLeave, touch }: { onLeave: () => void; touch: TouchInput
     <div className="pointer-events-none absolute inset-0 z-10 select-none">
       {h.alive && hpPct < 0.3 && h.connected && <div className="hud-lowhp absolute inset-0" />}
 
-      {/* Top-left: hero frame */}
-      <div className="absolute top-3 left-3 flex flex-col gap-2">
+      {/* Top-left: hero frame (slim bar on phones) */}
+      <div className="absolute top-2 left-2 flex flex-col gap-2 md:top-3 md:left-3">
+        {compact ? (
+          <div className="hud-panel flex w-[210px] items-center gap-2 p-2" style={{ ["--hud-accent" as string]: color }}>
+            <div className="grid h-7 w-7 shrink-0 place-items-center rounded-md border border-amber-300/60 bg-slate-950 font-display text-xs font-black text-amber-300">{h.level}</div>
+            <div className="flex min-w-0 flex-1 flex-col gap-1">
+              <VitalBar value={h.hp} max={h.maxHp} color={hpColor} height={12} label={`${Math.round(h.hp)} / ${h.maxHp} HP`} />
+              <VitalBar value={self?.xpIntoLevel ?? 0} max={self?.xpForNext ?? 1} color="#facc15" height={4} />
+              <div className="flex gap-2 font-mono text-[10px] text-slate-300">
+                <span>🪙 {self?.gold ?? 0}</span>
+                <span>⚔ {h.kills}</span>
+                <span>★ {h.score}</span>
+              </div>
+            </div>
+          </div>
+        ) : (
         <div className="hud-panel flex w-[340px] max-w-[calc(100vw-24px)] items-center gap-3 p-3" style={{ ["--hud-accent" as string]: color }}>
           <Portrait src={h.portrait} color={color} level={h.level} xp={self?.xpIntoLevel ?? 0} xpMax={self?.xpForNext ?? 1} />
           <div className="flex min-w-0 flex-1 flex-col gap-1.5">
@@ -283,6 +301,14 @@ export function Hud({ onLeave, touch }: { onLeave: () => void; touch: TouchInput
             </div>
           </div>
         </div>
+        )}
+        {compact && (
+          <div className="pointer-events-auto">
+            <Button size="sm" variant="secondary" onClick={onLeave}>
+              ⟵ {t("Menu")}
+            </Button>
+          </div>
+        )}
         {showFps && (
           <div className="font-mono text-[10px] text-slate-400">
             {h.fps} FPS · <span className={h.ping > 150 ? "text-rose-400" : "text-emerald-400"}>{h.ping} ms</span>
@@ -308,10 +334,10 @@ export function Hud({ onLeave, touch }: { onLeave: () => void; touch: TouchInput
       <RegionBanner />
 
       {/* Top-right: minimap + kill feed */}
-      <div className="absolute top-3 right-3 flex flex-col items-end gap-2">
-        <Minimap />
-        <ul className="flex w-72 flex-col gap-1 text-xs">
-          {h.killFeed.map((k) => (
+      <div className="absolute top-2 right-2 flex flex-col items-end gap-2 md:top-3 md:right-3">
+        <Minimap compact={compact} />
+        <ul className={cx("flex flex-col gap-1", compact ? "w-44 text-[10px]" : "w-72 text-xs")}>
+          {(compact ? h.killFeed.slice(-3) : h.killFeed).map((k) => (
             <li key={k.id} className="hud-feed flex items-center justify-end gap-2 rounded-sm border-r-2 border-rose-500 bg-gradient-to-l from-slate-950/90 to-slate-950/20 px-2 py-1">
               <span className="font-semibold text-amber-300">{who(k.killerName)}</span>
               <Icon name="sword" className="h-3.5 w-3.5" color="#f87171" />
@@ -322,16 +348,16 @@ export function Hud({ onLeave, touch }: { onLeave: () => void; touch: TouchInput
       </div>
 
       {/* Center notices */}
-      <div className="absolute top-48 left-1/2 flex -translate-x-1/2 flex-col items-center gap-1">
+      <div className={cx("absolute left-1/2 flex -translate-x-1/2 flex-col items-center gap-1 text-center", compact ? "top-24 w-[70vw]" : "top-48")}>
         {h.notices.map((n) => (
-          <div key={n.id} className="hud-notice font-display text-base font-black tracking-wide" style={{ color: n.color, textShadow: `0 0 14px ${n.color}, 0 2px 0 #000` }}>
+          <div key={n.id} className={cx("hud-notice font-display font-black tracking-wide", compact ? "text-xs" : "text-base")} style={{ color: n.color, textShadow: `0 0 14px ${n.color}, 0 2px 0 #000` }}>
             {n.text}
           </div>
         ))}
       </div>
 
       {/* Interaction prompts */}
-      <div className="absolute bottom-36 left-1/2 flex -translate-x-1/2 flex-col items-center gap-1.5">
+      <div className={cx("absolute left-1/2 flex -translate-x-1/2 flex-col items-center gap-1.5", compact ? "top-[42%]" : "bottom-36")}>
         {h.nearLoot &&
           (performance.now() < h.inventoryFullUntil ? (
             <Prompt k="E" text={t("Inventory full — sell or stash items in the menu")} color="#f87171" />
@@ -341,9 +367,9 @@ export function Hud({ onLeave, touch }: { onLeave: () => void; touch: TouchInput
         {h.nearMerchant && <Prompt k="B" text={t("Buy 5 potions")} color="#38bdf8" />}
       </div>
 
-      {/* Bottom: ability dock */}
-      {self && (
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
+      {/* Bottom: ability dock (touch devices use the thumb cluster instead) */}
+      {self && !touch && (
+        <div className={cx("absolute bottom-4 left-1/2 -translate-x-1/2", compact && "origin-bottom scale-75")}>
           <div className="hud-panel flex items-end gap-5 px-6 pt-4 pb-2">
             <AbilitySlot icon="attack" keyLabel="LMB" name={t("Attack")} readyAt={self.cooldowns.attack} now={now} color="#e2e8f0" />
             <AbilitySlot icon="dash" keyLabel="SPACE" name={t("Dash")} readyAt={self.cooldowns.dash} now={now} color="#7dd3fc" />
@@ -381,34 +407,45 @@ export function Hud({ onLeave, touch }: { onLeave: () => void; touch: TouchInput
       )}
 
       {/* Touch buttons (mobile architecture) */}
-      {touch && (
-        <div className="pointer-events-auto absolute right-4 bottom-32 grid grid-cols-2 gap-2">
-          {(
-            [
-              ["Dash", () => touch.buttons.dash = true, () => touch.buttons.dash = false],
-              ["Q", () => touch.buttons.skill = true, () => touch.buttons.skill = false],
-              ["R", () => touch.buttons.ultimate = true, () => touch.buttons.ultimate = false],
-              ["Loot", () => touch.trigger("pickup"), () => undefined],
-              ["Potion", () => touch.trigger("potion"), () => undefined],
-              ["Buy", () => touch.trigger("buy"), () => undefined],
-            ] as const
-          ).map(([label, down, up]) => (
-            <button key={label} onPointerDown={down} onPointerUp={up} className="h-14 w-14 rounded-full border border-cyan-400/40 bg-slate-950/80 font-display text-xs font-bold text-cyan-100 shadow-[0_0_14px_#22d3ee44] active:scale-95">
-              {t(label)}
-            </button>
-          ))}
-        </div>
+      {touch && self && (
+        <>
+          {performance.now() < hintUntil && (
+            <div className="pointer-events-none absolute top-[28%] left-1/2 w-[80vw] -translate-x-1/2 rounded-lg bg-slate-950/70 px-3 py-2 text-center font-display text-[11px] tracking-wider text-slate-200">
+              {t("Drag left side to move · Hold right side to aim & attack")}
+            </div>
+          )}
+          <div className="absolute right-3 bottom-3 h-[190px] w-[200px]">
+            <TouchButton className="right-0 bottom-0" size={72} icon="dash" label={t("Dash")} color="#7dd3fc" readyAt={self.cooldowns.dash} now={now} onDown={() => (touch.buttons.dash = true)} onUp={() => (touch.buttons.dash = false)} />
+            <TouchButton className="right-[84px] bottom-1" size={62} icon="skill" label="Q" color="#22d3ee" readyAt={self.cooldowns.skill} now={now} onDown={() => (touch.buttons.skill = true)} onUp={() => (touch.buttons.skill = false)} />
+            <TouchButton className="right-1 bottom-[84px]" size={62} icon="ultimate" label="R" color="#e879f9" readyAt={self.cooldowns.ultimate} now={now} onDown={() => (touch.buttons.ultimate = true)} onUp={() => (touch.buttons.ultimate = false)} />
+            <TouchButton className="right-[78px] bottom-[78px]" size={48} icon="potion" label={t("Potion")} color="#f472b6" count={self.potions} now={now} onDown={() => touch.trigger("potion")} />
+            {(h.nearLoot || h.nearMerchant) && (
+              <TouchButton
+                className="right-[150px] bottom-[62px]"
+                size={48}
+                icon={h.nearMerchant && !h.nearLoot ? "coin" : "star"}
+                label={h.nearMerchant && !h.nearLoot ? t("Buy") : t("Loot")}
+                color={h.nearMerchant && !h.nearLoot ? "#38bdf8" : "#fbbf24"}
+                highlight
+                now={now}
+                onDown={() => touch.trigger(h.nearMerchant && !h.nearLoot ? "buy" : "pickup")}
+              />
+            )}
+          </div>
+        </>
       )}
 
       {/* Leave */}
-      <div className="pointer-events-auto absolute bottom-3 left-3">
-        <Button size="sm" variant="secondary" onClick={onLeave}>
-          ⟵ {t("Menu")}
-        </Button>
-      </div>
+      {!compact && (
+        <div className="pointer-events-auto absolute bottom-3 left-3">
+          <Button size="sm" variant="secondary" onClick={onLeave}>
+            ⟵ {t("Menu")}
+          </Button>
+        </div>
+      )}
 
       {/* Scoreboard */}
-      <div className="absolute right-3 bottom-3 hidden w-60 text-xs md:block">
+      <div className={cx("absolute right-3 bottom-3 w-60 text-xs", compact || touch ? "hidden" : "hidden md:block")}>
         <div className="hud-panel p-2.5" style={{ ["--hud-accent" as string]: "#fbbf24" }}>
           <div className="mb-1.5 flex justify-between font-display text-[9px] font-bold tracking-[0.3em] text-slate-400">
             <span>{t("LEADERS")}</span>
@@ -462,6 +499,56 @@ function Stat({ icon, color, value }: { icon: string; color: string; value: Reac
       <Icon name={icon} className="h-3 w-3" color={color} />
       {value}
     </span>
+  );
+}
+
+/** Round thumb button for touch play, with the same cooldown sweep as the desktop dock. */
+function TouchButton(props: {
+  className: string;
+  size: number;
+  icon: string;
+  label: string;
+  color: string;
+  now: number;
+  readyAt?: number;
+  count?: number;
+  highlight?: boolean;
+  onDown: () => void;
+  onUp?: () => void;
+}) {
+  const { className, size, icon, label, color, now, readyAt = 0, count, highlight, onDown, onUp } = props;
+  const total = useRef(1);
+  const remaining = Math.max(0, readyAt - now);
+  if (remaining > total.current || remaining === 0) total.current = Math.max(1, remaining);
+  const frac = remaining > 0 ? remaining / total.current : 0;
+  const ready = remaining === 0 && (count === undefined || count > 0);
+  const release = () => onUp?.();
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      className={cx("pointer-events-auto absolute grid touch-none place-items-center rounded-full border-2 bg-slate-950/75 backdrop-blur-sm select-none active:scale-95", highlight && "animate-pulse", className)}
+      style={{ width: size, height: size, borderColor: ready ? color : "#475569", boxShadow: ready ? `0 0 16px ${color}66` : undefined }}
+      onPointerDown={(e) => {
+        e.preventDefault();
+        e.currentTarget.setPointerCapture(e.pointerId);
+        onDown();
+      }}
+      onPointerUp={release}
+      onPointerCancel={release}
+      onLostPointerCapture={release}
+      onContextMenu={(e) => e.preventDefault()}
+    >
+      <Icon name={icon} className={size > 60 ? "h-8 w-8" : "h-6 w-6"} color={ready ? color : "#64748b"} />
+      {remaining > 0 && (
+        <>
+          <span className="absolute inset-0 rounded-full" style={{ background: `conic-gradient(rgb(2 6 23 / 0.8) ${frac * 360}deg, transparent 0)` }} />
+          <span className="absolute font-display text-sm font-black text-white drop-shadow-[0_1px_2px_#000]">{(remaining / 1000).toFixed(remaining < 3000 ? 1 : 0)}</span>
+        </>
+      )}
+      {count !== undefined && <span className="absolute -top-1 -right-1 rounded-full bg-slate-900 px-1.5 font-display text-[10px] font-bold text-white">{count}</span>}
+      <span className="absolute -bottom-4 font-display text-[9px] font-bold tracking-wider text-slate-300">{label}</span>
+    </button>
   );
 }
 

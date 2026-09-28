@@ -121,3 +121,22 @@ test("offline demo: sell, lock and stash items", async ({ page }) => {
   await expect(page.getByText("Sold Neon Blade for 80 gold")).toBeVisible();
   await expect(page.locator(".glass", { hasText: "Neon Blade" })).toHaveCount(0);
 });
+
+test.describe("phone layout", () => {
+  test.use({ viewport: { width: 412, height: 915 }, hasTouch: true, isMobile: true });
+
+  test("offline demo shows the compact HUD and touch controls", async ({ page }) => {
+    await page.goto("/");
+    await page.getByRole("button", { name: "PLAY NOW" }).tap();
+    await page.getByRole("button", { name: "Try the offline demo" }).tap();
+    await expect(page.getByText("Welcome back")).toBeVisible();
+    await page.getByRole("button", { name: "PLAY", exact: true }).tap();
+    await expect(page.getByText(/HP$/).first()).toBeVisible({ timeout: 30_000 });
+    // Thumb buttons replace the desktop ability dock.
+    for (const name of ["Dash", "Q", "R", "Potion"]) await expect(page.getByRole("button", { name, exact: true })).toBeVisible();
+    await expect(page.getByText("SPACE", { exact: true })).toHaveCount(0);
+    await page.getByRole("button", { name: "Q", exact: true }).tap();
+    await page.getByRole("button", { name: "⟵ Menu" }).tap();
+    await expect(page.getByText("Welcome back")).toBeVisible();
+  });
+});
