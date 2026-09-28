@@ -251,6 +251,8 @@ export function Hud({ onLeave, touch }: { onLeave: () => void; touch: TouchInput
   const respawnIn = Math.max(0, Math.ceil((h.respawnAt - now) / 1000));
   const rank = h.scoreboard.findIndex((p) => p.name === h.selfName) + 1;
   const compact = useCompact();
+  /** The touch control hint shows for the first seconds of a session only. */
+  const [hintUntil] = useState(() => performance.now() + 8_000);
   const t = useT();
   const tc = useTc();
   const heroDef = CHARACTERS.find((c) => c.key === h.selfClass);
@@ -407,7 +409,11 @@ export function Hud({ onLeave, touch }: { onLeave: () => void; touch: TouchInput
       {/* Touch buttons (mobile architecture) */}
       {touch && self && (
         <>
-          <div className="pointer-events-none absolute bottom-4 left-4 font-display text-[10px] tracking-widest text-slate-500">{t("Drag left side to move · Hold right side to aim & attack")}</div>
+          {performance.now() < hintUntil && (
+            <div className="pointer-events-none absolute top-[28%] left-1/2 w-[80vw] -translate-x-1/2 rounded-lg bg-slate-950/70 px-3 py-2 text-center font-display text-[11px] tracking-wider text-slate-200">
+              {t("Drag left side to move · Hold right side to aim & attack")}
+            </div>
+          )}
           <div className="absolute right-3 bottom-3 h-[190px] w-[200px]">
             <TouchButton className="right-0 bottom-0" size={72} icon="dash" label={t("Dash")} color="#7dd3fc" readyAt={self.cooldowns.dash} now={now} onDown={() => (touch.buttons.dash = true)} onUp={() => (touch.buttons.dash = false)} />
             <TouchButton className="right-[84px] bottom-1" size={62} icon="skill" label="Q" color="#22d3ee" readyAt={self.cooldowns.skill} now={now} onDown={() => (touch.buttons.skill = true)} onUp={() => (touch.buttons.skill = false)} />

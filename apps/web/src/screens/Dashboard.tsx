@@ -60,7 +60,7 @@ export function Dashboard() {
         </Panel>
 
         {/* Center: PLAY */}
-        <section className="glass relative flex min-h-[420px] flex-col items-center justify-center gap-6 overflow-hidden p-6">
+        <section className="glass relative order-first flex min-h-[320px] flex-col items-center justify-center gap-6 overflow-hidden p-6 lg:order-none lg:min-h-[420px]">
           <div className="grid-bg absolute inset-0 opacity-60" />
           <div className="relative flex rounded-2xl bg-black/30 p-1">
             {(["CASUAL", "RANKED"] as const).map((m) => (
