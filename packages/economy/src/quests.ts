@@ -4,6 +4,7 @@ import type { PremiumTier, Quest, QuestObjective, Tx } from "@cryptoarena/databa
 import type { Logger } from "@cryptoarena/observability";
 import { addCharacterXp } from "./characters";
 import { AppError } from "./errors";
+import { lockActiveUser } from "./locks";
 import { grantReward, getActiveSeason } from "./rewards";
 import { questPeriodKey } from "./periods";
 
@@ -82,6 +83,7 @@ export async function recordQuestProgress(
 }
 
 export async function claimQuest(tx: Tx, config: AppConfig, logger: Logger, userId: string, questKey: string) {
+  await lockActiveUser(tx, userId);
   const quest = await tx.quest.findUnique({ where: { key: questKey } });
   if (!quest || !quest.active) throw new AppError("NOT_FOUND", "Quest not found");
   const periodKey = await periodKeyFor(tx, quest);

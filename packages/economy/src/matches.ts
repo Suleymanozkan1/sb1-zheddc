@@ -6,6 +6,7 @@ import type { Logger } from "@cryptoarena/observability";
 import { addCharacterXp } from "./characters";
 import { recordLeaderboardStats } from "./leaderboard";
 import { postJournal, transfer } from "./ledger";
+import { lockUser } from "./locks";
 import { recordQuestProgress } from "./quests";
 import { getActiveSeason } from "./rewards";
 
@@ -26,7 +27,9 @@ export interface PlayerProgressDelta {
   matchId: string;
   userId: string;
   userCharacterId: string;
-  /** Monotonic flush counter: makes each flush idempotent. */
+  /** Game-server session of this join; flushSeq restarts on every rejoin of the same match. */
+  sessionId: string;
+  /** Monotonic flush counter within the session: makes each flush idempotent. */
   flushSeq: number;
   kills: number;
   deaths: number;
@@ -47,7 +50,9 @@ export interface PlayerProgressDelta {
  * Gold is credited through the ledger with an idempotency key per flush.
  */
 export async function flushPlayerProgress(tx: Tx, _config: AppConfig, _logger: Logger, d: PlayerProgressDelta) {
-  const key = `match:${d.matchId}:${d.userId}:${d.flushSeq}`;
+  const key = `match:${d.matchId}:${d.userId}:${d.sessionId}:${d.flushSeq}`;
+  // Before any ledger lock, so the lock order matches the API paths (user lock, then accounts).
+  await lockUser(tx, d.userId);
   const done = await tx.ledgerJournal.findUnique({ where: { idempotencyKey: `${key}:marker` } });
   if (done) return { level: null as number | null, leveledUp: false, completedQuests: [] as { key: string; name: string }[] };
 

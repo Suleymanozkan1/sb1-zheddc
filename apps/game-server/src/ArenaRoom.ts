@@ -1,7 +1,7 @@
 import { Room, type AuthContext, type Client } from "@colyseus/core";
 import { StateView } from "@colyseus/schema";
 import type { AppConfig } from "@cryptoarena/config";
-import { AppError } from "@cryptoarena/economy";
+import { AppError, type PlayerProgressDelta } from "@cryptoarena/economy";
 import {
   BotBehaviorDetector,
   MAX_INPUTS_PER_SECOND,
@@ -63,6 +63,7 @@ interface ClientData {
   userCharacterId: string;
   inputRate: RateWindow;
   actionRate: RateWindow;
+  pingRate: RateWindow;
   violations: number;
   botDetector: BotBehaviorDetector;
   botFlagged: boolean;
@@ -72,6 +73,11 @@ interface ClientData {
   lastStatsSentAt: number;
   pendingPickup: boolean;
   lastFlushedDamage: number;
+  /** Snapshotted flushes not yet confirmed by the database, oldest first. */
+  pendingFlushes: PlayerProgressDelta[];
+  flushChain: Promise<void>;
+  /** Server-side potion cooldown (epoch ms). */
+  nextPotionAt: number;
   joinedAt: number;
 }
 
@@ -113,6 +119,7 @@ function seatTaken(userId: string): boolean {
 }
 const recentLeavers = new Map<string, { hpFraction: number; cooldowns: { attack: number; dash: number; skill: number; ultimate: number }; until: number }>();
 const pvpKillLog = new Map<string, number>();
+const pvpProgressLog = new Map<string, number>();
 
 const moveSchema = z.object({
   seq: z.number().int().nonnegative().max(2 ** 31),
@@ -126,14 +133,12 @@ const buySchema = z.object({ sku: z.string().max(64).regex(/^[a-z0-9_]+$/) });
 const inventoryIdSchema = z.object({ inventoryItemId: z.string().uuid() });
 const pingSchema = z.object({ t: z.number().finite() });
 
-/** In-arena merchant catalogue (prices still come from the ShopProduct table). */
-const MERCHANT_SKUS = new Set(["potion_pack_5"]);
 
 function pruneExpired(): void {
   const now = Date.now();
   for (const [k, v] of recentLeavers) if (v.until < now) recentLeavers.delete(k);
-  if (pvpKillLog.size > 50_000) {
-    for (const [k, t] of pvpKillLog) if (now - t > 3_600_000) pvpKillLog.delete(k);
+  for (const log of [pvpKillLog, pvpProgressLog]) {
+    if (log.size > 50_000) for (const [k, t] of log) if (now - t > 3_600_000) log.delete(k);
   }
 }
 
@@ -160,6 +165,10 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
   /** Sessions already removed from the simulation (eviction or leave); cleanup runs once. */
   private readonly departed = new Set<string>();
   private ended = false;
+  /** Room-wide PvP kill counter for reward idempotency keys. */
+  private killSeq = 0;
+  /** Set by the sim's killRewardEligible hook right before playerKilled fires. */
+  private lastKillRewarded = true;
 
   override async onCreate(options: { mode?: MatchMode }): Promise<void> {
     this.deps = ArenaRoom.deps;
@@ -283,6 +292,7 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
       userCharacterId: c.userCharacterId,
       inputRate: new RateWindow(MAX_INPUTS_PER_SECOND),
       actionRate: new RateWindow(8),
+      pingRate: new RateWindow(5),
       violations: 0,
       botDetector: new BotBehaviorDetector(),
       botFlagged: false,
@@ -292,6 +302,9 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
       lastStatsSentAt: 0,
       pendingPickup: false,
       lastFlushedDamage: 0,
+      pendingFlushes: [],
+      flushChain: Promise.resolve(),
+      nextPotionAt: 0,
       joinedAt: Date.now(),
     };
     // Counted together with userData so departPlayer's decrement always pairs with this increment.
@@ -487,7 +500,10 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
     this.onMessage("use_item", (client: ArenaClient, raw: unknown) => {
       const data = client.userData;
       if (!data || !data.actionRate.hit(Date.now())) return this.violation(client, "packet_spam", 1, { type: "use_item" });
+      // An empty payload means "drink a health potion"; anything else must be a valid inventory id.
+      const empty = raw === undefined || raw === null || (typeof raw === "object" && Object.keys(raw).length === 0);
       const parsed = inventoryIdSchema.safeParse(raw);
+      if (!empty && !parsed.success) return this.violation(client, "invalid_input", 2);
       void this.handleUseItem(client, parsed.success ? parsed.data.inventoryItemId : null);
     });
 
@@ -500,6 +516,8 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
     });
 
     this.onMessage("ping", (client: ArenaClient, raw: unknown) => {
+      const data = client.userData;
+      if (!data || !data.pingRate.hit(Date.now())) return this.violation(client, "packet_spam", 1, { type: "ping" });
       const parsed = pingSchema.safeParse(raw);
       if (!parsed.success) return;
       client.send("pong", { t: parsed.data.t, serverTime: this.sim.now });
@@ -549,13 +567,14 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
     const data = client.userData!;
     const p = this.sim.players.get(client.sessionId);
     if (!p || !p.alive) return;
-    if (!MERCHANT_SKUS.has(sku)) return this.notice(client, "warn", "The merchant does not sell that here");
+    if (!this.deps.config.arenaMerchantSkus.has(sku)) return this.notice(client, "warn", "The merchant does not sell that here");
     const nearMerchant = this.sim.map.merchants.some((m) => dist2(m.x, m.y, p.x, p.y) <= MERCHANT_RADIUS * MERCHANT_RADIUS);
     if (!nearMerchant) return this.violation(client, "merchant_out_of_range", 1);
     try {
       await this.deps.persistence.buy(data.userId, sku, `arena-${this.matchId}-${crypto.randomUUID()}`);
-      data.potions += 5;
-      this.notice(client, "info", "Purchased 5 health potions");
+      // The pack size lives in the product; re-read the real count instead of assuming it.
+      data.potions = await this.deps.persistence.countPotions(data.userId);
+      this.notice(client, "info", "Health potions purchased");
       this.sendSelfStats(client, true);
     } catch (err) {
       this.notice(client, "error", err instanceof AppError ? err.message : "Purchase failed");
@@ -566,6 +585,10 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
     const data = client.userData!;
     const p = this.sim.players.get(client.sessionId);
     if (!p || !p.alive) return;
+    const now = Date.now();
+    // Checked and set before the first await so parallel messages cannot drink several at once.
+    if (now < data.nextPotionAt) return this.notice(client, "warn", "Potion is on cooldown");
+    data.nextPotionAt = now + this.deps.config.POTION_COOLDOWN_MS;
     try {
       if (!inventoryItemId) {
         if (data.potions <= 0) return this.notice(client, "warn", "No potions left");
@@ -578,12 +601,14 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
           if (itemKey === "potion_health") data.potions = Math.max(0, data.potions - 1);
           this.sim.heal(p, typeof meta.fraction === "number" ? meta.fraction : 0.35);
         } else if (meta.effect === "xp_boost") {
-          p.xpBoostUntil = Date.now() + (typeof meta.durationMs === "number" ? meta.durationMs : 30 * 60_000);
+          // Stacking a second boost extends the running one instead of overwriting it.
+          p.xpBoostUntil = Math.max(p.xpBoostUntil, Date.now()) + (typeof meta.durationMs === "number" ? meta.durationMs : 30 * 60_000);
           this.notice(client, "info", "XP boost active");
         }
       }
       this.sendSelfStats(client, true);
     } catch (err) {
+      data.nextPotionAt = 0; // nothing was used
       this.notice(client, "error", err instanceof AppError ? err.message : "Could not use item");
     }
   }
@@ -609,6 +634,10 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
       attack: (p, kind, range) => this.broadcastNear(p.x, p.y, "player_attack", { id: p.id, aim: p.aim, kind, range }),
       damage: (targetId, x, y, sourceId, amount, crit, hp) => this.broadcastNear(x, y, "player_damage", { targetId, sourceId, amount, crit, hp }),
       playerKilled: (victim, killer) => this.onPlayerKilled(victim, killer),
+      killRewardEligible: (victim, killer) => {
+        this.lastKillRewarded = this.pvpProgressEligible(victim, killer);
+        return this.lastKillRewarded;
+      },
       npcKilled: (npc, killer) => this.onNpcKilled(npc, killer),
       respawn: (p) => this.broadcastNear(p.x, p.y, "player_respawn", { id: p.id, x: p.x, y: p.y }),
       levelUp: (p) => {
@@ -739,7 +768,9 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
     if (killer.kind !== "player") return;
     const kc = this.clientsBySim.get(killer.player.id);
     if (!kc?.userData) return;
-    kc.userData.progress.kills++;
+    const progressEligible = this.lastKillRewarded;
+    this.lastKillRewarded = true;
+    if (progressEligible) kc.userData.progress.kills++;
 
     // Crypto kill reward: real players only, anti-farming cooldown per (killer, victim) pair.
     if (victim.isBot || killer.player.isBot || victim.userId === killer.player.userId) return;
@@ -762,16 +793,33 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
           baseAmount: this.deps.config.KILL_REWARD_BASE,
           performanceBps: Math.round(ratio * 10_000),
           eventBps: this.mode === "RANKED" ? 12_000 : 10_000,
-          idempotencyKey: `kill:${killer.player.userId}:${victim.userId}:${this.matchId}:${killer.player.kills}`,
+          // Room-wide counter: per-player kill counts reset on rejoin and at ranked start.
+          idempotencyKey: `kill:${killer.player.userId}:${victim.userId}:${this.matchId}:${++this.killSeq}`,
           matchId: this.matchId,
         },
         victim.userId,
         this.deps.config.PVP_REPEAT_DECAY_BPS,
       )
       .then((r) => {
-        if (r.amount > 0n) kc.send("reward_granted", { source: "KILL", asset: "CRYPTO", amount: r.amount.toString(), reason: r.reason });
+        if (!r.duplicate && r.amount > 0n) kc.send("reward_granted", { source: "KILL", asset: "CRYPTO", amount: r.amount.toString(), reason: r.reason });
       })
       .catch((err: unknown) => this.deps.logger.error({ err }, "kill reward failed"));
+  }
+
+  /**
+   * Gold, XP and quest progress for a PvP kill. Bots are fair game; real victims pay out only if
+   * they are not guests (free alts) and the same pair has not traded kills within the cooldown.
+   */
+  private pvpProgressEligible(victim: SimPlayer, killer: SimPlayer): boolean {
+    if (victim.isBot || killer.isBot) return true;
+    if (victim.userId === killer.userId) return false;
+    const victimData = this.clientsBySim.get(victim.id)?.userData;
+    if (!victimData || victimData.isGuest) return false;
+    const pairKey = `${killer.userId}:${victim.userId}`;
+    const now = Date.now();
+    if (now - (pvpProgressLog.get(pairKey) ?? 0) < this.deps.config.PVP_PROGRESS_PAIR_COOLDOWN_SECONDS * 1000) return false;
+    pvpProgressLog.set(pairKey, now);
+    return true;
   }
 
   private onNpcKilled(npc: SimNpc, killer: SimPlayer): void {
@@ -967,43 +1015,55 @@ export class ArenaRoom extends Room<{ state: ArenaState; client: ArenaClient }> 
     const damage = p ? p.damageDealt : data.lastFlushedDamage;
     const damageDelta = Math.max(0, damage - data.lastFlushedDamage);
     const hasProgress = pr.kills || pr.deaths || pr.npcKills || pr.xp || pr.gold || pr.resources || pr.chests || damageDelta;
-    if (!hasProgress && !opts.left && !opts.win) return;
-
-    const delta = { ...pr, damageDealt: damageDelta };
-    pr.flushSeq++;
-    const seq = pr.flushSeq;
-    data.progress = { ...emptyProgress(), flushSeq: seq };
-    data.lastFlushedDamage = damage;
-    try {
-      const res = await this.deps.persistence.flush({
+    if (hasProgress || opts.left || opts.win) {
+      // Snapshot synchronously; the flush keeps its seq until it succeeds, so retries stay idempotent.
+      const seq = pr.flushSeq + 1;
+      data.pendingFlushes.push({
         matchId: this.matchId,
         userId: data.userId,
         userCharacterId: data.userCharacterId,
+        sessionId: client.sessionId,
         flushSeq: seq,
-        kills: delta.kills,
-        deaths: delta.deaths,
-        npcKills: delta.npcKills,
-        damageDealt: delta.damageDealt,
-        xp: delta.xp,
-        gold: delta.gold,
-        resources: delta.resources,
-        chests: delta.chests,
+        kills: pr.kills,
+        deaths: pr.deaths,
+        npcKills: pr.npcKills,
+        damageDealt: damageDelta,
+        xp: pr.xp,
+        gold: pr.gold,
+        resources: pr.resources,
+        chests: pr.chests,
         win: !!opts.win,
         left: !!opts.left,
         countsAsMatch: !!opts.countsAsMatch,
       });
-      for (const q of res.completedQuests) client.send("quest_complete", { questKey: q.key, name: q.name });
-    } catch (err) {
-      // Put the numbers back so the next flush retries them (the flushSeq keeps it idempotent).
-      data.progress.kills += delta.kills;
-      data.progress.deaths += delta.deaths;
-      data.progress.npcKills += delta.npcKills;
-      data.progress.xp += delta.xp;
-      data.progress.gold += delta.gold;
-      data.progress.resources += delta.resources;
-      data.progress.chests += delta.chests;
-      data.lastFlushedDamage -= delta.damageDealt;
-      this.deps.logger.error({ err, userId: data.userId }, "progress flush failed");
+      data.progress = { ...emptyProgress(), flushSeq: seq };
+      data.lastFlushedDamage = damage;
+    }
+    if (data.pendingFlushes.length === 0) return;
+    const final = !!opts.left || !!opts.win;
+    data.flushChain = data.flushChain.then(() => this.drainFlushes(client, data, final));
+    await data.flushChain;
+  }
+
+  /** Sends queued flushes in order. A final flush (leave / match end) is retried with backoff. */
+  private async drainFlushes(client: ArenaClient, data: ClientData, final: boolean): Promise<void> {
+    while (data.pendingFlushes.length > 0) {
+      const delta = data.pendingFlushes[0]!;
+      let attempt = 0;
+      for (;;) {
+        try {
+          const res = await this.deps.persistence.flush(delta);
+          data.pendingFlushes.shift();
+          for (const q of res.completedQuests) client.send("quest_complete", { questKey: q.key, name: q.name });
+          break;
+        } catch (err) {
+          this.deps.logger.error({ err, userId: data.userId, attempt }, "progress flush failed");
+          // Periodic flushes stay queued for the next tick; the player is gone after a final one.
+          if (!final || attempt >= 3) return;
+          await new Promise((resolve) => setTimeout(resolve, 1000 * 2 ** attempt));
+          attempt++;
+        }
+      }
     }
   }
 

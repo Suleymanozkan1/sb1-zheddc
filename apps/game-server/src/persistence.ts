@@ -173,6 +173,10 @@ export class Persistence {
     );
   }
 
+  countPotions(userId: string) {
+    return countItem(this.prisma, userId, "potion_health");
+  }
+
   consumePotion(userId: string) {
     return this.enqueue(userId, () => withTransaction(this.prisma, (tx) => consumeItem(tx, userId, "potion_health")));
   }

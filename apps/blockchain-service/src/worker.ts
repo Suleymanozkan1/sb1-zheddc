@@ -44,7 +44,7 @@ function backoffMs(attempts: number): number {
 export class WithdrawalWorker {
   private readonly deps: WorkerDeps;
   /** Signed wire transactions kept in memory so they can be re-broadcast while still valid. */
-  private readonly wire = new Map<string, string>();
+  private readonly wire = new Map<string, { tx: string; lastValidBlockHeight: bigint }>();
   private stopped = false;
 
   constructor(deps: WorkerDeps) {
@@ -77,7 +77,7 @@ export class WithdrawalWorker {
         if (w.lastValidBlockHeight !== null && height <= w.lastValidBlockHeight) {
           // Still valid and not yet seen: re-broadcast the SAME signed transaction (idempotent on-chain).
           const wire = this.wire.get(w.signature);
-          if (wire) await gateway.sendTransaction(wire).catch((err: unknown) => log.warn({ err: (err as Error).message }, "re-broadcast failed"));
+          if (wire) await gateway.sendTransaction(wire.tx).catch((err: unknown) => log.warn({ err: (err as Error).message }, "re-broadcast failed"));
           await rescheduleWithdrawal(ctx, w, CONFIRM_POLL_MS, null);
           return "waiting";
         }
@@ -123,7 +123,8 @@ export class WithdrawalWorker {
       wireTx = encodeMockTransfer(signature, this.treasuryAddress, w.walletAddress, w.mint, w.amount);
     }
     await recordWithdrawalSignature(ctx, w, w.signature, signature, lastValidBlockHeight);
-    this.wire.set(signature, wireTx);
+    this.evictExpired(lastValidBlockHeight);
+    this.wire.set(signature, { tx: wireTx, lastValidBlockHeight });
 
     try {
       await gateway.sendTransaction(wireTx);
@@ -136,6 +137,17 @@ export class WithdrawalWorker {
       log.warn({ err: message, signature }, "broadcast failed; will re-check signature status");
       await rescheduleWithdrawal(ctx, w, backoffMs(w.attempts + 1), message);
       return "waiting";
+    }
+  }
+
+  /**
+   * Drops transactions that can no longer land. Entries are normally removed when this worker sees
+   * the outcome, but another worker (or a lost claim) may finish the withdrawal instead.
+   * A fresh blockhash is valid for ~150 blocks, so anything valid only up to `fresh - 150` expired.
+   */
+  private evictExpired(freshLastValidBlockHeight: bigint): void {
+    for (const [sig, entry] of this.wire) {
+      if (entry.lastValidBlockHeight < freshLastValidBlockHeight - 150n) this.wire.delete(sig);
     }
   }
 
