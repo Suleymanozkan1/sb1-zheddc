@@ -23,7 +23,8 @@ export interface ArenaLink {
   readonly rtt: number;
   serverNow(): number;
   send<K extends keyof ClientMessages>(type: K, payload: ClientMessages[K]): void;
-  on<K extends keyof ServerMessages>(type: K, handler: Handler<K>): void;
+  /** Registers a message handler; the returned function unsubscribes it. */
+  on<K extends keyof ServerMessages>(type: K, handler: Handler<K>): () => void;
   callbacks(): StateCallbacks;
   /** Resolves once the first full state (map seed) is available. */
   ready(): Promise<void>;
@@ -100,17 +101,22 @@ export class GameConnection implements ArenaLink {
     (this.room.send as (t: string, m: unknown) => void)(type, payload);
   }
 
-  on<K extends keyof ServerMessages>(type: K, handler: Handler<K>): void {
+  on<K extends keyof ServerMessages>(type: K, handler: Handler<K>): () => void {
+    const h = handler as (m: unknown) => void;
     const list = this.listeners.get(type) ?? [];
-    list.push(handler as (m: unknown) => void);
+    list.push(h);
     this.listeners.set(type, list);
     for (let i = 0; i < this.early.length; i++) {
       const e = this.early[i]!;
       if (e.type === type) {
         this.early.splice(i--, 1);
-        (handler as (m: unknown) => void)(e.msg);
+        h(e.msg);
       }
     }
+    return () => {
+      const current = this.listeners.get(type);
+      if (current) this.listeners.set(type, current.filter((x) => x !== h));
+    };
   }
 
   async leave(): Promise<void> {

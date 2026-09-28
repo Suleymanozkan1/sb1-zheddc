@@ -89,6 +89,12 @@ export const envSchema = z.object({
   USER_DAILY_REWARD_CAP: bigintStr.prefault("100000000"),
   KILL_REWARD_BASE: bigintStr.prefault("200000"),
   PVP_SAME_VICTIM_COOLDOWN_SECONDS: z.coerce.number().int().min(0).default(600),
+  /** Gold/XP/quest progress for killing the same real player again is withheld for this long. */
+  PVP_PROGRESS_PAIR_COOLDOWN_SECONDS: z.coerce.number().int().min(0).default(60),
+  /** Minimum time between two consumables used in the arena. */
+  POTION_COOLDOWN_MS: z.coerce.number().int().min(0).default(5000),
+  /** Comma-separated SKUs the in-arena merchant sells (prices come from the ShopProduct table). */
+  ARENA_MERCHANT_SKUS: z.string().default("potion_pack_5"),
   /** PvP kills pay crypto only for non-guest victims at or above this level. */
   PVP_REWARD_MIN_VICTIM_LEVEL: z.coerce.number().int().min(1).default(5),
   /** Each earlier reward today for the same killer→victim pair multiplies the next one by this (bps). */
@@ -111,8 +117,8 @@ export const envSchema = z.object({
   SELL_CONSUMABLE_BPS: z.coerce.number().int().min(0).max(10_000).default(2_500),
   /** Share of the gold spent on +N upgrades that selling returns (bps). Must stay below 100 %. */
   SELL_UPGRADE_REFUND_BPS: z.coerce.number().int().min(0).max(9_000).default(2_500),
-  /** Maximum items per (bulk) sell request. */
-  SELL_MAX_ITEMS: z.coerce.number().int().min(1).max(500).default(100),
+  /** Maximum items per (bulk) sell request. At least 100: the web client sends batches of 100. */
+  SELL_MAX_ITEMS: z.coerce.number().int().min(100).max(500).default(100),
   BLOCKED_COUNTRIES: z.string().default(""),
   MIN_AGE: z.coerce.number().int().min(0).default(18),
   REQUIRE_KYC_FOR_WITHDRAWAL: bool.default(false),
@@ -121,6 +127,7 @@ export const envSchema = z.object({
 export type AppConfig = z.infer<typeof envSchema> & {
   webOrigins: string[];
   blockedCountries: Set<string>;
+  arenaMerchantSkus: Set<string>;
   isProduction: boolean;
 };
 
@@ -167,6 +174,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): AppConfig {
   return {
     ...c,
     webOrigins: c.PUBLIC_WEB_ORIGINS.split(",").map((s) => s.trim()).filter(Boolean),
+    arenaMerchantSkus: new Set(c.ARENA_MERCHANT_SKUS.split(",").map((s) => s.trim()).filter(Boolean)),
     blockedCountries: new Set(c.BLOCKED_COUNTRIES.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean)),
     isProduction,
   };

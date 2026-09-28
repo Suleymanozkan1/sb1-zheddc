@@ -176,6 +176,7 @@ All values live in `.env` (copy of [`.env.example`](.env.example)); every variab
 | `REWARD_POOL` | 16 000 tokens | Global **daily** crypto reward budget (≈ season pool / 60 days) |
 | `SEASON_REWARD_POOL` | 1 000 000 tokens | Pool funded when a season starts |
 | `USER_DAILY_REWARD_CAP`, `KILL_REWARD_BASE`, `PVP_SAME_VICTIM_COOLDOWN_SECONDS` | 100, 0.2 tokens, 600 | Anti-farming |
+| `PVP_PROGRESS_PAIR_COOLDOWN_SECONDS`, `POTION_COOLDOWN_MS`, `ARENA_MERCHANT_SKUS` | 60, 5000, potion_pack_5 | PvP gold/XP farming guard, potion cooldown, in-arena merchant |
 | `PVP_REWARD_MIN_VICTIM_LEVEL`, `PVP_REPEAT_DECAY_BPS` | 5, 5000 | PvP crypto only for non-guest victims ≥ level 5; repeat kills of the same victim halve per day |
 | `RANKED_REWARD_BASE`, `RANKED_REWARD_MIN_HUMANS`, `RANKED_REWARD_FULL_HUMANS` | 2 tokens, 6, 12 | Ranked top-3 crypto needs ≥ 6 real players (50 % → 100 % at 12) |
 | `TITAN_REWARD_BASE`, `TITAN_MIN_DAMAGE_SHARE_BPS`, `TITAN_REWARDS_PER_USER_DAY` | 5 tokens, 500, 3 | World boss reward split by damage share (≥ 5 %), max 3 per user per day |

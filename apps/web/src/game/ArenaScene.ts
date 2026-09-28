@@ -17,7 +17,7 @@ import {
   type ArenaMap,
   type MoverState,
 } from "@cryptoarena/game-core";
-import { Buttons, RARITY_COLORS, type Rarity } from "@cryptoarena/shared";
+import { Buttons, RARITY_COLORS, type Rarity, type ServerMessages } from "@cryptoarena/shared";
 import Phaser from "phaser";
 import { t, tc } from "../lib/i18n";
 import { useApp } from "../lib/store";
@@ -119,6 +119,9 @@ export class ArenaScene extends Phaser.Scene {
   private selfReady = false;
   private lastHudAt = 0;
   private lastMinimapAt = 0;
+  /** Message subscriptions on the link, removed when the scene goes away. */
+  private readonly unsubscribers: (() => void)[] = [];
+  private tornDown = false;
 
   constructor() {
     super({ key: "arena" });
@@ -148,7 +151,10 @@ export class ArenaScene extends Phaser.Scene {
       cam.filters.external.addVignette(0.5, 0.5, 0.95, 0.42, 0x000010);
     }
     cam.setZoom(this.scale.width < 900 ? 0.75 : 1);
-    this.scale.on("resize", (size: Phaser.Structs.Size) => cam.setZoom(size.width < 900 ? 0.75 : 1));
+    const onResize = (size: Phaser.Structs.Size): void => {
+      cam.setZoom(size.width < 900 ? 0.75 : 1);
+    };
+    this.scale.on("resize", onResize);
 
     if (isTouchDevice()) {
       this.touch = new TouchInput(this);
@@ -162,7 +168,21 @@ export class ArenaScene extends Phaser.Scene {
     this.bindMessages();
     useHud.getState().set({ connected: true, worldSize: this.map.size, mapSeed: this.map.seed, mode: state.mode });
 
-    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.input_.destroy());
+    // game.destroy() only emits DESTROY (no SHUTDOWN), so tear down on whichever comes first.
+    const teardown = (): void => {
+      if (this.tornDown) return;
+      this.tornDown = true;
+      for (const off of this.unsubscribers.splice(0)) off();
+      this.scale.off("resize", onResize);
+      this.input_.destroy();
+    };
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, teardown);
+    this.events.once(Phaser.Scenes.Events.DESTROY, teardown);
+  }
+
+  /** Subscribes to a link message for the lifetime of this scene. */
+  private onMessage<K extends keyof ServerMessages>(type: K, handler: (msg: ServerMessages[K]) => void): void {
+    this.unsubscribers.push(this.conn.on(type, handler));
   }
 
   // ───────────────────────── World ─────────────────────────
@@ -701,8 +721,8 @@ export class ArenaScene extends Phaser.Scene {
     const settings = useApp.getState().settings;
     const me = this.conn.sessionId;
 
-    this.conn.on("self_stats", (m) => useHud.getState().set({ self: m }));
-    this.conn.on("player_attack", (m) => {
+    this.onMessage("self_stats", (m) => useHud.getState().set({ self: m }));
+    this.onMessage("player_attack", (m) => {
       const b = this.players.get(m.id);
       if (!b) return;
       if (m.kind === "melee") this.slash(b.container.x, b.container.y, m.aim, m.range, 0xffffff);
@@ -713,7 +733,7 @@ export class ArenaScene extends Phaser.Scene {
         else this.shockwave(b.container.x, b.container.y, Math.max(120, m.range), m.kind === "ultimate" ? 0xe879f9 : 0x22d3ee);
       }
     });
-    this.conn.on("player_damage", (m) => {
+    this.onMessage("player_damage", (m) => {
       const target = this.players.get(m.targetId) ?? this.npcs.get(m.targetId);
       if (!target) return;
       if (settings.showDamageNumbers) this.floatText(target.container.x, target.container.y - 30, `${m.crit ? "✦" : ""}${m.amount}`, m.crit ? "#fbbf24" : m.sourceId === me ? "#ffffff" : "#f87171", m.crit ? 22 : 16);
@@ -729,48 +749,48 @@ export class ArenaScene extends Phaser.Scene {
       this.sparks.setParticleTint(m.crit ? 0xfbbf24 : 0xffffff).explode(m.crit ? 14 : this.hq ? 7 : 3, target.container.x, target.container.y);
       if (m.targetId === me && settings.screenShake) this.cameras.main.shake(90, 0.004);
     });
-    this.conn.on("player_death", (m) => {
+    this.onMessage("player_death", (m) => {
       hud.pushKill(m);
       if (m.victimId === me) useHud.getState().set({ respawnAt: m.respawnAt, killedBy: m.killerName });
       const b = this.players.get(m.victimId);
       if (b) this.burst(b.container.x, b.container.y, 0xf43f5e, 50);
     });
-    this.conn.on("player_respawn", (m) => {
+    this.onMessage("player_respawn", (m) => {
       if (m.id === me) {
         this.mover = { x: m.x, y: m.y, dashRemainingMs: 0, dashDirX: 0, dashDirY: 0 };
         this.pending = [];
       }
     });
-    this.conn.on("player_level_up", (m) => {
+    this.onMessage("player_level_up", (m) => {
       const b = this.players.get(m.id);
       if (b) this.levelUp(b.container.x, b.container.y);
       if (m.id === me) useHud.getState().pushNotice(t("LEVEL UP! → {n}", { n: m.level }), "#facc15");
     });
-    this.conn.on("item_pickup", (m) => {
+    this.onMessage("item_pickup", (m) => {
       const color = RARITY_COLORS[m.rarity] ?? "#fff";
       const name = RESOURCES.some((r) => r.key === m.itemKey) ? tc("resource", m.itemKey, m.name) : tc("item", m.itemKey, m.name);
       useHud.getState().pushNotice(m.gold ? t("+{name} (+{gold} gold)", { name, gold: m.gold }) : t("Picked up {name}", { name }), color);
     });
-    this.conn.on("quest_complete", (m) => {
+    this.onMessage("quest_complete", (m) => {
       const name = tc("quest", m.questKey, m.name);
       useHud.getState().pushNotice(t("Quest complete: {name}", { name }), "#a3e635");
       useApp.getState().toast("success", t("Quest complete: {name} — claim it in Quests", { name }));
     });
-    this.conn.on("reward_granted", (m) => {
+    this.onMessage("reward_granted", (m) => {
       const d = useApp.getState().me?.balances.cryptoDecimals ?? 6;
       const sym = useApp.getState().me?.balances.cryptoSymbol ?? "ARENA";
       const amount = Number(BigInt(m.amount)) / 10 ** d;
       useHud.getState().pushNotice(`+${amount.toFixed(3)} ${sym} (${m.source.toLowerCase()})`, "#e879f9");
     });
-    this.conn.on("notice", (m) => {
+    this.onMessage("notice", (m) => {
       if (/^Inventory (is )?full/.test(m.message)) useHud.getState().set({ inventoryFullUntil: performance.now() + 15_000 });
     });
-    this.conn.on("notice", (m) => useHud.getState().pushNotice(t(m.message), m.level === "error" ? "#f87171" : m.level === "warn" ? "#fbbf24" : "#7dd3fc"));
-    this.conn.on("match_start", () => useHud.getState().pushNotice(t("MATCH STARTED — FIGHT!"), "#f43f5e"));
-    this.conn.on("match_end", (m) => useHud.getState().set({ standings: m.standings }));
-    this.conn.on("item_drop", () => undefined);
-    this.conn.on("player_join", () => undefined);
-    this.conn.on("player_leave", () => undefined);
+    this.onMessage("notice", (m) => useHud.getState().pushNotice(t(m.message), m.level === "error" ? "#f87171" : m.level === "warn" ? "#fbbf24" : "#7dd3fc"));
+    this.onMessage("match_start", () => useHud.getState().pushNotice(t("MATCH STARTED — FIGHT!"), "#f43f5e"));
+    this.onMessage("match_end", (m) => useHud.getState().set({ standings: m.standings }));
+    this.onMessage("item_drop", () => undefined);
+    this.onMessage("player_join", () => undefined);
+    this.onMessage("player_leave", () => undefined);
   }
 
   // ───────────────────────── Effects ─────────────────────────

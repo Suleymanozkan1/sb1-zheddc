@@ -13,6 +13,7 @@ import { characterBaseFromRow, type AbilityJson } from "./catalog";
 import { AppError } from "./errors";
 import { getEquippedForStats } from "./inventory";
 import { postJournal, transfer } from "./ledger";
+import { lockActiveUser, lockUser } from "./locks";
 
 
 
@@ -94,6 +95,8 @@ export async function upgradeCharacterStat(
   stat: StatKey,
   idempotencyKey: string,
 ): Promise<void> {
+  // Without the lock two concurrent upgrades would both pay the price of the same level.
+  await lockActiveUser(tx, userId);
   const uc = await tx.userCharacter.findFirst({ where: { id: userCharacterId, userId }, include: { upgrades: true } });
   if (!uc) throw new AppError("NOT_FOUND", "Character not owned");
   const current = uc.upgrades.find((u) => u.stat === stat)?.points ?? 0;
@@ -121,6 +124,9 @@ export async function upgradeCharacterStat(
 /** Adds server-computed XP to a character, applying level-ups and stat points. */
 export async function addCharacterXp(tx: Tx, userCharacterId: string, xp: number): Promise<{ level: number; leveledUp: boolean }> {
   if (!Number.isInteger(xp) || xp < 0) throw new AppError("INTERNAL", "Invalid XP delta");
+  const owner = await tx.userCharacter.findUniqueOrThrow({ where: { id: userCharacterId }, select: { userId: true } });
+  // Read-modify-write below: serialise with quest claims and match flushes of the same user.
+  await lockUser(tx, owner.userId);
   const uc = await tx.userCharacter.findUniqueOrThrow({ where: { id: userCharacterId } });
   const newXp = uc.xp + xp;
   const newLevel = Math.min(MAX_LEVEL, levelFromXp(newXp));

@@ -138,6 +138,8 @@ export interface SimEvents {
   attack(p: SimPlayer, kind: "melee" | "projectile" | "skill" | "ultimate", range: number): void;
   damage(targetId: string, x: number, y: number, sourceId: string, amount: number, crit: boolean, hp: number): void;
   playerKilled(victim: SimPlayer, killer: Killer): void;
+  /** Optional: whether a PvP kill grants XP and gold (called just before playerKilled). */
+  killRewardEligible?(victim: SimPlayer, killer: SimPlayer): boolean;
   npcKilled(npc: SimNpc, killer: SimPlayer): void;
   respawn(p: SimPlayer): void;
   levelUp(p: SimPlayer): void;

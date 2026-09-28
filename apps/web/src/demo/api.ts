@@ -4,6 +4,7 @@ import { getCharacterDef, itemUpgradeCost } from "@cryptoarena/game-core";
 import { StatKey, type LeaderboardDto, type LeaderboardRowDto, type LeaderboardScope, type QuestDto, type ShopProductDto } from "@cryptoarena/shared";
 import type { Api } from "../lib/api";
 import { setDemo } from "../lib/demo";
+import { tc } from "../lib/i18n";
 import { DEMO_PRODUCTS, DEMO_QUESTS, DEMO_RIVALS, DEMO_SELL_MAX_ITEMS } from "./catalog";
 import {
   DemoError,
@@ -145,16 +146,16 @@ export const demoApi: Api = {
     mutate((p) => {
       const ids = [...new Set(inventoryItemIds)];
       if (ids.length === 0) throw new DemoError("Nothing to sell");
-      if (ids.length > DEMO_SELL_MAX_ITEMS) throw new DemoError(`You can sell at most ${DEMO_SELL_MAX_ITEMS} items at once`);
+      if (ids.length > DEMO_SELL_MAX_ITEMS) throw new DemoError("You can sell at most {n} items at once", { n: DEMO_SELL_MAX_ITEMS });
       let gold = 0;
       for (const id of ids) {
         const row = p.inventory.find((r) => r.id === id);
         if (!row) throw new DemoError("Item not found in your inventory");
-        const name = itemDef(row.itemKey).name;
-        if (row.locked) throw new DemoError(`${name} is locked`);
-        if (row.equipped) throw new DemoError(`Unequip ${name} before selling it`);
+        const name = tc("item", row.itemKey, itemDef(row.itemKey).name);
+        if (row.locked) throw new DemoError("{name} is locked", { name });
+        if (row.equipped) throw new DemoError("Unequip {name} before selling it", { name });
         const value = sellValueOf(row);
-        if (value === null) throw new DemoError(`${name} cannot be sold`);
+        if (value === null) throw new DemoError("{name} cannot be sold", { name });
         gold += value;
       }
       p.inventory = p.inventory.filter((r) => !ids.includes(r.id));
@@ -176,10 +177,11 @@ export const demoApi: Api = {
       if (!!row.inStash === toStash) return { ok: true };
       if (row.equipped) throw new DemoError("Unequip the item before storing it");
       const def = itemDef(row.itemKey);
-      // A stack joins an existing stack at the destination without using a new slot.
+      // A stack joins an existing stack at the destination without using a new slot. Not capped
+      // at maxStack: the server only moves the row, so capping here would destroy items.
       const target = def.stackable ? p.inventory.find((r) => r.itemKey === row.itemKey && !!r.inStash === toStash) : undefined;
       if (target) {
-        target.quantity = Math.min(def.maxStack, target.quantity + row.quantity);
+        target.quantity += row.quantity;
         target.locked = !!target.locked || !!row.locked;
         p.inventory = p.inventory.filter((r) => r !== row);
         return { ok: true };
@@ -197,7 +199,7 @@ export const demoApi: Api = {
       const slot = slotFor(def);
       if (!slot) throw new DemoError("This item cannot be equipped");
       if (row.inStash) throw new DemoError("Take the item out of the stash first");
-      if (def.levelRequirement > maxCharacterLevel(p)) throw new DemoError(`Requires level ${def.levelRequirement}`);
+      if (def.levelRequirement > maxCharacterLevel(p)) throw new DemoError("Requires level {level}", { level: def.levelRequirement });
       for (const r of p.inventory) {
         if (r.equipped && r.equippedSlot === slot) {
           r.equipped = false;

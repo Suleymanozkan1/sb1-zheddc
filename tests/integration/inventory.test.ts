@@ -111,4 +111,19 @@ describe("inventory: selling, locks and the stash", () => {
     await withTransaction(c.prisma, (tx) => equipItem(tx, user.id, it.row.id));
     await expect(withTransaction(c.prisma, (tx) => moveItem(tx, user.id, it.row.id, true))).rejects.toBeInstanceOf(AppError);
   });
+
+  it("concurrent moves cannot overfill the stash", async () => {
+    const { user } = await freshUser();
+    await c.prisma.user.update({ where: { id: user.id }, data: { stashSlots: 2 } });
+    const rows = await Promise.all([1, 2, 3, 4, 5].map(() => give(user.id, "blade_common")));
+    await Promise.allSettled(rows.map((r) => withTransaction(c.prisma, (tx) => moveItem(tx, user.id, r.row.id, true))));
+    expect(await c.prisma.inventoryItem.count({ where: { userId: user.id, inStash: true } })).toBe(2);
+  });
+
+  it("suspended accounts cannot sell", async () => {
+    const { user } = await freshUser();
+    const a = await give(user.id, "blade_common");
+    await c.prisma.user.update({ where: { id: user.id }, data: { status: "SUSPENDED" } });
+    await expect(sell(user.id, [a.row.id])).rejects.toMatchObject({ code: "ACCOUNT_RESTRICTED" });
+  });
 });

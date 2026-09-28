@@ -5,6 +5,7 @@ import type { Item, InventoryItem, ItemSource, Tx } from "@cryptoarena/database"
 import { parseItemStats } from "./catalog";
 import { AppError } from "./errors";
 import { postJournal, transfer } from "./ledger";
+import { lockActiveUser, lockUser } from "./locks";
 
 export function itemToDto(item: Item): ItemDto {
   return {
@@ -111,6 +112,8 @@ export async function grantItem(tx: Tx, input: GrantItemInput): Promise<{ row: I
   if (!item.stackable && input.quantity !== 1) throw new AppError("BAD_REQUEST", "Non-stackable items are granted one at a time");
 
   if (!input.ignoreCapacity) {
+    // Serialise with moves and other grants so concurrent requests cannot overfill the inventory.
+    await lockUser(tx, input.userId);
     const user = await tx.user.findUniqueOrThrow({ where: { id: input.userId }, select: { inventorySlots: true } });
     const hasStack = item.stackable && (await tx.inventoryItem.count({ where: { userId: input.userId, itemId: item.id, inStash: false } })) > 0;
     if (!hasStack && (await usedSlots(tx, input.userId)) >= user.inventorySlots) {
@@ -173,6 +176,7 @@ export interface SellResult {
  */
 export async function sellItems(tx: Tx, config: AppConfig, input: { userId: string; inventoryItemIds: string[]; idempotencyKey: string }): Promise<SellResult> {
   const key = `item_sale:${input.userId}:${input.idempotencyKey}`;
+  await lockActiveUser(tx, input.userId);
   if (await tx.ledgerJournal.findUnique({ where: { idempotencyKey: key }, select: { id: true } })) return { sold: 0, gold: 0n, duplicate: true };
   const ids = [...new Set(input.inventoryItemIds)];
   if (ids.length === 0) throw new AppError("BAD_REQUEST", "Nothing to sell");
@@ -185,7 +189,7 @@ export async function sellItems(tx: Tx, config: AppConfig, input: { userId: stri
   for (const id of ids) {
     const group = await stackRows(tx, input.userId, id);
     const first = group[0]!;
-    if (rows.has(first.id)) continue; // two ids of the same stack
+    if (group.some((r) => rows.has(r.id))) continue; // two ids of the same stack
     if (!sellable(first.item)) throw new AppError("BAD_REQUEST", `${first.item.name} cannot be sold`);
     if (group.some((r) => r.equipped)) throw new AppError("BAD_REQUEST", `Unequip ${first.item.name} before selling it`);
     if (group.some((r) => r.locked)) throw new AppError("FORBIDDEN", `${first.item.name} is locked`);
@@ -195,10 +199,18 @@ export async function sellItems(tx: Tx, config: AppConfig, input: { userId: stri
     for (const r of group) rows.set(r.id, r);
   }
 
-  // Delete exactly what was priced; a concurrent change (equip, lock, sale) aborts the transaction.
-  const removed = await tx.inventoryItem.deleteMany({ where: { id: { in: [...rows.keys()] }, userId: input.userId, equipped: false, locked: false } });
-  if (removed.count !== rows.size) throw new AppError("CONFLICT", "Your inventory changed, please retry");
-  if (gold > 0n) {
+  // Delete exactly what was priced (ids and quantities); a concurrent change (equip, lock, sale,
+  // a potion drunk in the arena) aborts the transaction instead of paying for items already gone.
+  let removed = 0;
+  for (const r of rows.values()) {
+    const res = await tx.inventoryItem.deleteMany({ where: { id: r.id, userId: input.userId, quantity: r.quantity, upgradeLevel: r.upgradeLevel, equipped: false, locked: false } });
+    removed += res.count;
+  }
+  if (removed !== rows.size) throw new AppError("CONFLICT", "Your inventory changed, please retry");
+  if (gold === 0n) {
+    // Nothing to pay, but record the key so a retry of this request is recognised as a duplicate.
+    await tx.ledgerJournal.create({ data: { type: "ITEM_SALE", idempotencyKey: key, description: "zero-value item sale" } });
+  } else {
     await postJournal(tx, {
       type: "ITEM_SALE",
       idempotencyKey: key,
@@ -210,12 +222,15 @@ export async function sellItems(tx: Tx, config: AppConfig, input: { userId: stri
 }
 
 export async function setItemLocked(tx: Tx, userId: string, inventoryItemId: string, locked: boolean): Promise<void> {
+  await lockActiveUser(tx, userId);
   const group = await stackRows(tx, userId, inventoryItemId);
   await tx.inventoryItem.updateMany({ where: { id: { in: group.map((r) => r.id) }, userId }, data: { locked } });
 }
 
 /** Moves an item (stackables: the whole stack) between the inventory and the stash. */
 export async function moveItem(tx: Tx, userId: string, inventoryItemId: string, toStash: boolean): Promise<void> {
+  // Serialise with other moves and loot grants so the slot count below cannot race.
+  await lockActiveUser(tx, userId);
   const group = await stackRows(tx, userId, inventoryItemId);
   const first = group[0]!;
   if (first.inStash === toStash) return;
@@ -259,6 +274,7 @@ export async function unequipItem(tx: Tx, userId: string, inventoryItemId: strin
 }
 
 export async function upgradeItem(tx: Tx, userId: string, inventoryItemId: string, idempotencyKey: string): Promise<InventoryItemDto> {
+  await lockActiveUser(tx, userId);
   const row = await tx.inventoryItem.findFirst({ where: { id: inventoryItemId, userId }, include: { item: true } });
   if (!row) throw new AppError("NOT_FOUND", "Item not found in your inventory");
   if (row.item.stackable || row.item.maxUpgrade === 0) throw new AppError("BAD_REQUEST", "This item cannot be upgraded");

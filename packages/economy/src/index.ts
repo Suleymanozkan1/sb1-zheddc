@@ -18,3 +18,4 @@ export * from "./withdrawals";
 export * from "./users";
 export * from "./matches";
 export * from "./admin";
+export * from "./locks";

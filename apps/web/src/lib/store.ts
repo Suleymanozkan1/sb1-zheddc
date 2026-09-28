@@ -1,7 +1,7 @@
 import type { BalancesDto, MatchMode, MeDto } from "@cryptoarena/shared";
 import { create } from "zustand";
 import { prefersLowQuality } from "./device";
-import { t, type Lang } from "./i18n";
+import { LocalizedError, t, type Lang } from "./i18n";
 
 export type Screen = "landing" | "dashboard" | "game" | "characters" | "inventory" | "shop" | "wallet" | "leaderboard" | "quests" | "settings";
 
@@ -116,5 +116,6 @@ export const useApp = create<AppState>((set, get) => ({
 }));
 
 export function errorMessage(err: unknown): string {
+  if (err instanceof LocalizedError) return t(err.message, err.params);
   return err instanceof Error ? t(err.message) : t("Something went wrong");
 }

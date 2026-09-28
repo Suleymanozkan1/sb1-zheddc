@@ -8,6 +8,7 @@ import { grantCharacter } from "./characters";
 import { requireFeature } from "./compliance";
 import { AppError } from "./errors";
 import { grantItem } from "./inventory";
+import { lockUser } from "./locks";
 import { postJournal, transfer, type LedgerLeg } from "./ledger";
 import { parseProductMetadata } from "./products";
 
@@ -65,6 +66,8 @@ export interface PurchaseInput {
 
 export async function purchaseProduct(tx: Tx, config: AppConfig, logger: Logger, input: PurchaseInput) {
   const idem = `purchase:${input.userId}:${input.idempotencyKey}`;
+  // Serialise purchases per user so per-user limits and ownership checks cannot race.
+  await lockUser(tx, input.userId);
   const prior = await tx.purchase.findUnique({ where: { idempotencyKey: idem } });
   if (prior) return { purchase: prior, duplicate: true };
 
@@ -169,6 +172,11 @@ export async function refundPurchase(tx: Tx, logger: Logger, purchaseId: string,
   const purchase = await tx.purchase.findUnique({ where: { id: purchaseId }, include: { product: true } });
   if (!purchase) throw new AppError("NOT_FOUND", "Purchase not found");
   if (purchase.status === "REFUNDED") throw new AppError("CONFLICT", "Purchase already refunded");
+  await lockUser(tx, purchase.userId);
+  // Claim the refund first: a concurrent second refund stops here instead of revoking twice.
+  const refundedAt = new Date();
+  const claimed = await tx.purchase.updateMany({ where: { id: purchase.id, status: "COMPLETED" }, data: { status: "REFUNDED", refundedAt } });
+  if (claimed.count !== 1) throw new AppError("CONFLICT", "Purchase already refunded");
   const meta = parseProductMetadata(purchase.product.metadata);
 
   // Revoke grants first so a refund cannot leave the user with both the goods and the money.
@@ -176,9 +184,9 @@ export async function refundPurchase(tx: Tx, logger: Logger, purchaseId: string,
     for (const [gi, g] of meta.grants.entries()) {
       const ref = `purchase:${purchase.id}:${unit}:${gi}`;
       if (g.kind === "ITEM") {
-        const revoked = await tx.inventoryItem.deleteMany({ where: { sourceRef: ref, userId: purchase.userId } });
-        // A sold (or used up) item cannot be revoked; refunding anyway would pay twice.
-        if (revoked.count === 0) throw new AppError("CONFLICT", "A purchased item was already sold or used; use a balance adjustment instead");
+        // Only an untouched grant can be revoked; a sold, used or partly used stack would pay twice.
+        const revoked = await tx.inventoryItem.deleteMany({ where: { sourceRef: ref, userId: purchase.userId, quantity: g.quantity } });
+        if (revoked.count !== 1) throw new AppError("CONFLICT", "A purchased item was already sold or used; use a balance adjustment instead");
       } else if (g.kind === "GEMS" || g.kind === "GOLD") {
         await postJournal(tx, {
           type: "REFUND",
@@ -196,7 +204,8 @@ export async function refundPurchase(tx: Tx, logger: Logger, purchaseId: string,
           await tx.userCharacter.delete({ where: { id: uc.id } });
         }
       } else if (g.kind === "INVENTORY_SLOTS") {
-        await tx.user.update({ where: { id: purchase.userId }, data: { inventorySlots: { decrement: g.amount } } });
+        const u = await tx.user.findUniqueOrThrow({ where: { id: purchase.userId }, select: { inventorySlots: true } });
+        await tx.user.update({ where: { id: purchase.userId }, data: { inventorySlots: Math.max(0, u.inventorySlots - g.amount) } });
       } else if (g.kind === "STASH_SLOTS") {
         const u = await tx.user.findUniqueOrThrow({ where: { id: purchase.userId }, select: { stashSlots: true } });
         await tx.user.update({ where: { id: purchase.userId }, data: { stashSlots: Math.max(0, u.stashSlots - g.amount) } });
@@ -226,7 +235,7 @@ export async function refundPurchase(tx: Tx, logger: Logger, purchaseId: string,
     refundJournalId = posted.journalId;
   }
 
-  const updated = await tx.purchase.update({ where: { id: purchase.id }, data: { status: "REFUNDED", refundedAt: new Date(), refundJournalId } });
+  const updated = await tx.purchase.update({ where: { id: purchase.id }, data: { refundJournalId } });
   await writeAudit(tx, {
     actorType: "ADMIN",
     adminUserId,

@@ -14,6 +14,16 @@ export const LANGS: readonly { code: Lang; label: string }[] = [
 export type Params = Record<string, string | number>;
 export type TFunction = (text: string, params?: Params) => string;
 
+/** An error whose English message is a translation key with {placeholders}; see errorMessage(). */
+export class LocalizedError extends Error {
+  readonly params: Params | undefined;
+
+  constructor(message: string, params?: Params) {
+    super(message);
+    this.params = params;
+  }
+}
+
 function fill(text: string, params?: Params): string {
   if (!params) return text;
   return text.replace(/\{(\w+)\}/g, (m, k: string) => (k in params ? String(params[k]) : m));

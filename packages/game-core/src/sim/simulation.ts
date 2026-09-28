@@ -595,9 +595,11 @@ export class ArenaSimulation {
       if (killer.kind === "player") {
         killer.player.kills++;
         killer.player.score += 10;
-        this.addXp(killer.player, killXp(40 + v.level * 12, killer.player.level, v.level));
-        const gold = 10 + v.level * 3;
-        this.events.goldGained(killer.player, gold);
+        // The host may withhold farmable rewards (alt accounts, repeated kills of the same victim).
+        if (this.events.killRewardEligible?.(v, killer.player) ?? true) {
+          this.addXp(killer.player, killXp(40 + v.level * 12, killer.player.level, v.level));
+          this.events.goldGained(killer.player, 10 + v.level * 3);
+        }
       }
       this.events.playerKilled(v, killer);
     }
